@@ -1,5 +1,6 @@
 function generateLevel() end
 function chekItemCollection() end
+function startNextLevel() end
 function love.load()
 
     gridSize = 20
@@ -11,26 +12,45 @@ function love.load()
     love.window.setMode(gridWidth * gridSize, gridHeight * gridSize + 40)
     love.window.setTitle("Worn Out")
 
-    gameState = "playing"
-
-   local generatedData = generateLevel()
-
-    map = generatedData.map
-    batteries = generatedData.batteries
-    batteryItemValue = 50
-
     player = {
-        x = generatedData.playerStart.x,
-        y = generatedData.playerStart.y, 
         battery = 150, -- Aumentei um pouco a bateria para o labirinto
         maxBattery = 150,
-        moves = 0
+        moves = 0,
+        score = 0
     }
 
-    goal = {
-        x = generatedData.goalPos.x,
-        y = generatedData.goalPos.y
-    }
+    goal = {}
+    abilityCost = 25
+    startNextLevel()
+end
+
+function startNextLevel()
+    local generatedData = generateLevel()
+    map = generatedData.map
+    batteries = generatedData.batteries
+    traps = generatedData.traps
+    batteryItemValue = 50
+
+    player.x = generatedData.playerStart.x 
+    player.y = generatedData.playerStart.y 
+    player.moves = 0
+    player.isStuck = false
+
+    goal.x = generatedData.goalPos.x
+    goal.y = generatedData.goalPos.y
+
+    gameState = "playing"
+
+end
+
+function updatePlayerStatus()
+    player.isStuck = false
+    for _, trap in ipairs(traps) do
+        if player.x == trap.x and player.y == trap.y then
+            player.isStuck = true
+            break
+        end
+    end
 end
 
 function generateLevel()
@@ -84,18 +104,29 @@ function generateLevel()
 
     local newBatteries = {}
     local numBatteries = 4
-        for i = 1, numBatteries do
-            if #availableSpots > 0 then
-                local batteryPos = table.remove(availableSpots, 1)
-                table.insert(newBatteries, batteryPos)
-            end
+    for i = 1, numBatteries do
+        if #availableSpots > 0 then
+            local batteryPos = table.remove(availableSpots, 1)
+            table.insert(newBatteries, batteryPos)
         end
+    end
+
+    local newTraps = {}
+    local numTraps = 8 
+    for i = 1, numTraps do
+        if #availableSpots > 0 then
+            local trapPos = table.remove(availableSpots, 1)
+            table.insert(newTraps, trapPos)
+        end
+    end
+
 
     return {
         map = newMap,
         playerStart = playerStartPos,
         goalPos = goalPos,
-        batteries = newBatteries
+        batteries = newBatteries,
+        traps = newTraps
     }
 end
 
@@ -104,46 +135,89 @@ function love.update(dt)
 end
 
 function love.keypressed(key)
-    if gameState ~= "playing" then
-        if key == "r" then
-            love.load()
-        end
+    if gameState == "won" and key == "r" then
+        player.score = (player.score + player.battery) - player.moves
+        startNextLevel()
+        return
+    elseif gameState == "lost" and key == "r" then
+        love.load()
         return
     end
+    
+    if gameState ~= "playing" then return end
 
-    --- ALTERADO: Lógica de movimento agora checa por paredes
+    if player.isStuck then
+        if key == "up" or key == "down" or key == "left" or key == "right" then
+            player.isStuck = false
+            player.battery = player.battery - 1
+
+            if player.battery <= 0 then
+                player.battery = 0
+                gameState = "lost"
+            end
+            return
+        end
+    end
+
+    local moved = false
     local targetX, targetY = player.x, player.y
 
     if key == "up" then
         targetY = player.y - 1
+        moved = true
     elseif key == "down" then
         targetY = player.y + 1
+        moved = true
     elseif key == "left" then
         targetX = player.x - 1
+        moved = true
     elseif key == "right" then
         targetX = player.x + 1
+        moved = true
+    elseif key == "space" then
+        if player.battery > abilityCost then
+            player.battery = player.battery - abilityCost
+
+            local neighbors = {
+                {x = player.x, y = player.y - 1},
+                {x = player.x, y = player.y + 1},
+                {x = player.x - 1, y = player.y},
+                {x = player.x + 1, y = player.y}
+            }
+
+            for _, pos in ipairs(neighbors) do
+                if pos.x > 1 and pos.x < gridWidth and pos.y > 1 and pos.y < gridHeight then
+                    if map[pos.y][pos.x] == 1 then
+                        map[pos.y][pos.x] = 0
+                    end
+                end
+            end
+            if player.battery <= 0 then
+                player.battery = 0
+                gameState = "lost"
+            end
+        end
+        return
     else
         return -- Sai da função se não for uma tecla de movimento
     end
     
-    -- Checa se o movimento é válido (dentro do grid E não é uma parede)
-    if targetX >= 1 and targetX <= gridWidth and
-       targetY >= 1 and targetY <= gridHeight and
-       map[targetY][targetX] ~= 1 then -- A MÁGICA ACONTECE AQUI!
+    if moved then
+        if targetX >= 1 and targetX <= gridWidth and
+            targetY >= 1 and targetY <= gridHeight and
+            map[targetY][targetX] ~= 1 then -- A MÁGICA ACONTECE AQUI!
        
-        -- Se for válido, move o jogador e gasta bateria
-        player.x = targetX
-        player.y = targetY
-        player.battery = player.battery - 1
-        player.moves = player.moves + 1
-
-        checkItemCollection()
-
-        -- Checa condição de vitória/derrota
-        if player.x == goal.x and player.y == goal.y then
-            gameState = "won"
-        elseif player.battery <= 0 then
-            gameState = "lost"
+            player.x = targetX
+            player.y = targetY
+            player.battery = player.battery - 1
+            player.moves = player.moves + 1
+            checkItemCollection()
+            updatePlayerStatus()
+            if player.x == goal.x and player.y == goal.y then
+                gameState = "won"
+            elseif player.battery <= 0 then
+                gameState = "lost"
+            end
         end
     end
 end
@@ -186,6 +260,11 @@ function love.draw()
         love.graphics.line(0, i * gridSize, gridWidth * gridSize, i * gridSize)
     end
 
+    love.graphics.setColor(0.6, 0.2, 0.8, 0.8)
+    for _, trap in ipairs(traps) do
+        love.graphics.circle("fill", (trap.x - 1) * gridSize + gridSize / 2, (trap.y - 1) * gridSize + gridSize / 2, gridSize / 3 )
+    end
+
     -- Desenha o objetivo
     love.graphics.setColor(0, 1, 0, 0.5) 
     love.graphics.rectangle("fill", (goal.x - 1) * gridSize, (goal.y - 1) * gridSize, gridSize, gridSize)
@@ -198,49 +277,65 @@ function love.draw()
     love.graphics.setColor(0.2, 0.6, 1) -- Mudei a cor do jogador para um azul mais vivo
     love.graphics.rectangle("fill", (player.x - 1) * gridSize, (player.y - 1) * gridSize, gridSize, gridSize)
 
+    if player.isStuck then
+        love.graphics.setColor(1, 0.2, 0.2)
+    else
+        love.graphics.setColor(0.2, 0.6, 1)
+    end
+    love.graphics.rectangle("fill", (player.x - 1) * gridSize, (player.y - 1) * gridSize, gridSize, gridSize)
+
     -- Desenha a UI
     drawUI()
 
     -- Mensagens de vitória/derrota (sem alteração)
-    if gameState == "won" then
+   if gameState == "won" then
         love.graphics.setColor(1, 1, 1)
-        love.graphics.setFont(love.graphics.newFont(40))
-        love.graphics.printf("VOCE VENCEU!", 0, love.graphics.getHeight() / 2 - 50, love.graphics.getWidth(), "center")
-        love.graphics.setFont(love.graphics.newFont(20))
-        local score = player.battery
-        love.graphics.printf("Pontuação: " .. score .. " | Movimentos: " .. player.moves, 0, love.graphics.getHeight() / 2, love.graphics.getWidth(), "center")
-        love.graphics.printf("Pressione R para reiniciar", 0, love.graphics.getHeight() / 2 + 30, love.graphics.getWidth(), "center")
+        love.graphics.setFont(love.graphics.newFont(32)) -- Diminuí de 40 para 32
+        love.graphics.printf("VOCÊ VENCEU!", 0, love.graphics.getHeight() / 2 - 60, love.graphics.getWidth(), "center")
+        
+        love.graphics.setFont(love.graphics.newFont(16)) -- Diminuí de 20 para 16
+        love.graphics.printf("Bateria Restante: " .. player.battery, 0, love.graphics.getHeight() / 2 - 20, love.graphics.getWidth(), "center")
+        love.graphics.printf("Pontuação Total: " .. player.score, 0, love.graphics.getHeight() / 2, love.graphics.getWidth(), "center")
+        love.graphics.printf("Pressione R para o próximo nível", 0, love.graphics.getHeight() / 2 + 25, love.graphics.getWidth(), "center")
     elseif gameState == "lost" then
         love.graphics.setColor(1, 0, 0)
-        love.graphics.setFont(love.graphics.newFont(40))
-        love.graphics.printf("BATERIA ESGOTADA!", 0, love.graphics.getHeight() / 2 - 20, love.graphics.getWidth(), "center")
-        love.graphics.setFont(love.graphics.newFont(20))
+        love.graphics.setFont(love.graphics.newFont(32)) -- Diminuí de 40 para 32
+        love.graphics.printf("BATERIA ESGOTADA!", 0, love.graphics.getHeight() / 2 - 30, love.graphics.getWidth(), "center")
+        
+        love.graphics.setFont(love.graphics.newFont(16)) -- Diminuí de 20 para 16
         love.graphics.setColor(1, 1, 1)
-        love.graphics.printf("Aperte 'R' para reiniciar", 0, love.graphics.getHeight() / 2 + 20, love.graphics.getWidth(), "center")
+        love.graphics.printf("Aperte 'R' para reiniciar", 0, love.graphics.getHeight() / 2 + 10, love.graphics.getWidth(), "center")
     end
 end
 
 
 
 function drawUI()
-    -- Nenhuma mudança aqui
     local uiY = gridHeight * gridSize + 5
 
     love.graphics.setColor(0.1, 0.1, 0.1)
     love.graphics.rectangle("fill", 0, gridHeight * gridSize, love.graphics.getWidth(), 40)
 
+    -- Bateria (diminuída)
     love.graphics.setColor(1, 0, 0)
-    local maxBatteryBarWidth = 200
-    love.graphics.rectangle("fill", 10, uiY, maxBatteryBarWidth, 30)
+    local maxBatteryBarWidth = 120 -- Diminuído de 200 para 120
+    love.graphics.rectangle("fill", 10, uiY, maxBatteryBarWidth, 25) -- Altura também diminuída
 
     love.graphics.setColor(0, 1, 0)
-    -- ALTERADO: O cálculo da barra agora usa a bateria máxima
     local batteryWidth = (player.battery / player.maxBattery) * maxBatteryBarWidth
-    love.graphics.rectangle("fill", 10, uiY, batteryWidth, 30)
+    love.graphics.rectangle("fill", 10, uiY, batteryWidth, 25)
 
+    -- Texto da bateria
     love.graphics.setColor(1, 1, 1)
-    love.graphics.setFont(love.graphics.newFont(16))
-    love.graphics.printf(player.battery .. "/" .. player.maxBattery, 10, uiY + 7, maxBatteryBarWidth, "center")
+    love.graphics.setFont(love.graphics.newFont(14)) -- Fonte um pouco menor
+    love.graphics.printf(player.battery .. "/" .. player.maxBattery, 10, uiY + 5, maxBatteryBarWidth, "center")
 
-    love.graphics.printf("Movimentos: " .. player.moves, 230, uiY + 7, 200, "left")
+    -- Movimentos (melhor posicionado)
+    love.graphics.printf("Movimentos: " .. player.moves, 140, uiY + 5, 120, "left")
+
+    -- Instruções (compactadas)
+    love.graphics.printf("[Space] Quebrar (" .. abilityCost .. ")", 270, uiY + 5, 180, "left")
+
+    -- Pontuação (melhor alinhada)
+    love.graphics.printf("Pontuação: " .. player.score, love.graphics.getWidth() - 150, uiY + 5, 140, "right")
 end
