@@ -12,11 +12,21 @@ function love.load()
     love.window.setMode(gridWidth * gridSize, gridHeight * gridSize + 40)
     love.window.setTitle("Worn Out")
 
+    game = {
+        level = 0
+    }
+
     player = {
         battery = 150, -- Aumentei um pouco a bateria para o labirinto
         maxBattery = 150,
         moves = 0,
-        score = 0
+        score = 0,
+        abilityRange = 1
+    }
+
+    shopItems = {
+        {name="Powerbank", description="Aumenta a bateria máxima em 50."},
+        {name = "Shockwave", description="Aumenta o alcance do [Space] em 1. "}
     }
 
     goal = {}
@@ -25,6 +35,7 @@ function love.load()
 end
 
 function startNextLevel()
+    game.level = game.level + 1
     local generatedData = generateLevel()
     map = generatedData.map
     batteries = generatedData.batteries
@@ -34,12 +45,16 @@ function startNextLevel()
     player.x = generatedData.playerStart.x 
     player.y = generatedData.playerStart.y 
     player.moves = 0
+    player.battery = player.maxBattery
     player.isStuck = false
 
     goal.x = generatedData.goalPos.x
     goal.y = generatedData.goalPos.y
 
     gameState = "playing"
+
+    decayInterval = 1
+    decayTimer = 0
 
 end
 
@@ -131,19 +146,45 @@ function generateLevel()
 end
 
 function love.update(dt)
-    -- Nenhuma mudança aqui
+    if gameState == "playing" then
+        decayTimer = decayTimer + dt
+
+        if decayTimer >= decayInterval then
+            player.battery = player.battery - 1
+
+            decayTimer = decayTimer - decayInterval
+            
+            if player.battery <= 0 then
+                player.battery = 0
+                gameState = "lost"
+            end
+        end
+    end
 end
 
 function love.keypressed(key)
     if gameState == "won" and key == "r" then
         player.score = (player.score + player.battery) - player.moves
-        startNextLevel()
+        if game.level > 0 and game.level % 5 == 0 then
+            gameState = "shop"
+        else
+            startNextLevel()
+        end
         return
     elseif gameState == "lost" and key == "r" then
         love.load()
         return
+
+    elseif gameState == "shop" then
+        if key == "1" then
+            player.maxBattery = player.maxBattery + 50
+            startNextLevel()
+        elseif key == "2" then
+            player.abilityRange = player.abilityRange + 1
+            startNextLevel()
+        end
+        return
     end
-    
     if gameState ~= "playing" then return end
 
     if player.isStuck then
@@ -178,17 +219,17 @@ function love.keypressed(key)
         if player.battery > abilityCost then
             player.battery = player.battery - abilityCost
 
-            local neighbors = {
-                {x = player.x, y = player.y - 1},
-                {x = player.x, y = player.y + 1},
-                {x = player.x - 1, y = player.y},
-                {x = player.x + 1, y = player.y}
-            }
-
-            for _, pos in ipairs(neighbors) do
-                if pos.x > 1 and pos.x < gridWidth and pos.y > 1 and pos.y < gridHeight then
-                    if map[pos.y][pos.x] == 1 then
-                        map[pos.y][pos.x] = 0
+               for dy = -player.abilityRange, player.abilityRange do
+                for dx = -player.abilityRange, player.abilityRange do
+                    if dx == 0 and dy == 0 then
+                        
+                    else
+                        local pos = {x = player.x +dx, y = player.y + dy}
+                        if pos.x > 1 and pos.x < gridWidth and pos.y > 1 and pos.y < gridHeight then
+                            if map[pos.y][pos.x] == 1 then
+                                map[pos.y][pos.x] = 0
+                            end
+                        end
                     end
                 end
             end
@@ -238,6 +279,10 @@ end
 
 
 function love.draw()
+    if gameState == "shop" then
+        drawShop()
+        return
+    end
     -- Limpa a tela com uma cor de fundo
     love.graphics.clear(0.15, 0.15, 0.15)
 
@@ -306,8 +351,29 @@ function love.draw()
         love.graphics.setColor(1, 1, 1)
         love.graphics.printf("Aperte 'R' para reiniciar", 0, love.graphics.getHeight() / 2 + 10, love.graphics.getWidth(), "center")
     end
+
+    
 end
 
+function drawShop()
+    love.graphics.clear(0.1, 0.1, 0.2)
+
+    love.graphics.setColor(1, 1, 1)
+    love.graphics.setFont(love.graphics.newFont(32))
+    love.graphics.printf("LOJA DE UPGRADES", 0, 40, love.graphics.getWidth(), "center")
+
+    love.graphics.setFont(love.graphics.newFont(16))
+    -- Item 1: Powerbank
+    love.graphics.printf("[1] " .. shopItems[1].name, 50, 150, 500, "left")
+    love.graphics.printf(shopItems[1].description, 70, 180, 450, "left")
+
+    -- Item 2: Shockwave
+    love.graphics.printf("[2] " .. shopItems[1].name, 50, 260, 500, "left")
+    love.graphics.printf(shopItems[2].description, 70, 180, 450, "left")
+
+    love.graphics.setFont(love.graphics.newFont(20))
+    love.graphics.printf("Sua escolha te levara para o proximo nivel.", 0, love.graphics.getHeight() - 80, love.graphics.getWidth(), "center")
+end
 
 
 function drawUI()
@@ -338,4 +404,6 @@ function drawUI()
 
     -- Pontuação (melhor alinhada)
     love.graphics.printf("Pontuação: " .. player.score, love.graphics.getWidth() - 150, uiY + 5, 140, "right")
+
+    love.graphics.printf("Nivel: " .. game.level, 140, uiY + 20, 120, "left")
 end
