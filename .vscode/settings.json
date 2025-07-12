@@ -6,6 +6,7 @@
         "undefined-global",
         "lowercase-global",
         "need-check-nil",
-        "undefined-field"
+        "undefined-field",
+        "redundant-parameter"
     ]
 }

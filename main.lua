@@ -13,7 +13,9 @@ function love.load()
     love.window.setTitle("Worn Out")
 
     game = {
-        level = 0
+        level = 0,
+        shopInterval = 5,
+        nextShopLevel = 5
     }
 
     player = {
@@ -21,29 +23,47 @@ function love.load()
         maxBattery = 150,
         moves = 0,
         score = 0,
-        abilityRange = 1
+        abilityRange = 1,
+        abilityCooldown = 0, 
+        visionRange = 6
     }
 
     shopItems = {
         {name="Powerbank", description="Aumenta a bateria máxima em 50."},
-        {name = "Shockwave", description="Aumenta o alcance do [Space] em 1. "}
+        {name = "Shockwave", description="Aumenta o alcance do [Space] em 1. "},
+        {name="Scanner", description="Aumenta o alcance da visao do escuro."}
     }
 
     goal = {}
     abilityCost = 25
+    abilityCooldownDuration = 15
     startNextLevel()
 end
 
 function startNextLevel()
     game.level = game.level + 1
-    local generatedData = generateLevel()
+
+    local levelType = "normal"
+    local specialChance = math.random()
+    if specialChance < 0.2 then
+        levelType = "few_batteries"
+    elseif specialChance < 0.4 then
+        levelType = "more_traps"
+    elseif specialChance < 0.55 then
+        levelType = "dark"
+    end
+
+    game.currentLevelType = levelType
+    game.lightTimer = 0
+    game.isLit = false
+    local generatedData = generateLevel(levelType)
     map = generatedData.map
     batteries = generatedData.batteries
     traps = generatedData.traps
     batteryItemValue = 50
 
-    player.x = generatedData.playerStart.x 
-    player.y = generatedData.playerStart.y 
+    player.x = generatedData.playerStart.x
+    player.y = generatedData.playerStart.y
     player.moves = 0
     player.battery = player.maxBattery
     player.isStuck = false
@@ -68,7 +88,17 @@ function updatePlayerStatus()
     end
 end
 
-function generateLevel()
+function generateLevel(levelType)
+    local numBatteries = 4
+    local numTraps = 8
+
+    if levelType == "few_batteries" then
+        numBatteries = 1
+    elseif levelType == "more_traps" then
+        numTraps = 16
+    elseif levelType == "dark" then
+        numBatteries = 5
+    end
     local newMap = {}
     for y = 1, gridHeight do
         newMap[y] = {}
@@ -76,7 +106,6 @@ function generateLevel()
             newMap[y][x] = 1
         end
     end
-
 
     local function carvePassages(cx, cy)
         local directions = {{0, -2}, {0, 2}, {-2, 0}, {2, 0}}
@@ -118,7 +147,6 @@ function generateLevel()
     local goalPos = table.remove(availableSpots, 1)
 
     local newBatteries = {}
-    local numBatteries = 4
     for i = 1, numBatteries do
         if #availableSpots > 0 then
             local batteryPos = table.remove(availableSpots, 1)
@@ -127,14 +155,12 @@ function generateLevel()
     end
 
     local newTraps = {}
-    local numTraps = 8 
     for i = 1, numTraps do
         if #availableSpots > 0 then
             local trapPos = table.remove(availableSpots, 1)
             table.insert(newTraps, trapPos)
         end
     end
-
 
     return {
         map = newMap,
@@ -159,13 +185,21 @@ function love.update(dt)
                 gameState = "lost"
             end
         end
+
+        if game.lightTimer > 0 then 
+            game.lightTimer = game.lightTimer - dt
+        end
+
+        if player.abilityCooldown > 0 then
+            player.abilityCooldown = player.abilityCooldown - dt
+        end
     end
 end
 
 function love.keypressed(key)
     if gameState == "won" and key == "r" then
         player.score = (player.score + player.battery) - player.moves
-        if game.level > 0 and game.level % 5 == 0 then
+        if game.level == game.nextShopLevel then
             gameState = "shop"
         else
             startNextLevel()
@@ -176,11 +210,18 @@ function love.keypressed(key)
         return
 
     elseif gameState == "shop" then
+        local choiceMade = false
         if key == "1" then
             player.maxBattery = player.maxBattery + 50
-            startNextLevel()
+            choiceMade = true
         elseif key == "2" then
             player.abilityRange = player.abilityRange + 1
+            choiceMade = true
+        end
+
+        if choiceMade then
+            game.shopInterval = game.shopInterval * 2
+            game.nextShopLevel = game.level + game.shopInterval
             startNextLevel()
         end
         return
@@ -216,8 +257,9 @@ function love.keypressed(key)
         targetX = player.x + 1
         moved = true
     elseif key == "space" then
-        if player.battery > abilityCost then
+        if player.battery > abilityCost and player.abilityCooldown <= 0 then
             player.battery = player.battery - abilityCost
+            player.abilityCooldown = abilityCooldownDuration
 
                for dy = -player.abilityRange, player.abilityRange do
                 for dx = -player.abilityRange, player.abilityRange do
@@ -271,11 +313,14 @@ function checkItemCollection()
             if player.battery > player.maxBattery then
                 player.battery = player.maxBattery
             end
-            table.remove(batteries, i) -- Remove o item coletado
+            table.remove(batteries, i)
+
+            if game.currentLevelType == "dark" then
+                game.lightTimer = game.lightTimer + 10
+            end
         end
     end
 end
-
 
 
 function love.draw()
@@ -283,20 +328,19 @@ function love.draw()
         drawShop()
         return
     end
-    -- Limpa a tela com uma cor de fundo
+    
     love.graphics.clear(0.15, 0.15, 0.15)
 
-    --- NOVO: Desenha o mapa (chão e paredes)
+    -- 1. Desenha o cenário e itens que podem ser escondidos
+    -- Mapa e Grade
     for y=1, gridHeight do
         for x=1, gridWidth do
-            if map[y][x] == 1 then -- Se for uma parede
-                love.graphics.setColor(0.5, 0.5, 0.5) -- Cor cinza para paredes
+            if map[y][x] == 1 then
+                love.graphics.setColor(0.5, 0.5, 0.5)
                 love.graphics.rectangle("fill", (x - 1) * gridSize, (y - 1) * gridSize, gridSize, gridSize)
             end
         end
     end
-
-    -- Desenha a grade por cima (opcional, mas fica legal)
     love.graphics.setColor(0.2, 0.2, 0.2)
     for i = 1, gridWidth do
         love.graphics.line(i * gridSize, 0, i * gridSize, gridHeight * gridSize)
@@ -304,55 +348,80 @@ function love.draw()
     for i = 1, gridHeight do
         love.graphics.line(0, i * gridSize, gridWidth * gridSize, i * gridSize)
     end
-
+    -- Armadilhas e Objetivo
     love.graphics.setColor(0.6, 0.2, 0.8, 0.8)
     for _, trap in ipairs(traps) do
         love.graphics.circle("fill", (trap.x - 1) * gridSize + gridSize / 2, (trap.y - 1) * gridSize + gridSize / 2, gridSize / 3 )
     end
-
-    -- Desenha o objetivo
     love.graphics.setColor(0, 1, 0, 0.5) 
     love.graphics.rectangle("fill", (goal.x - 1) * gridSize, (goal.y - 1) * gridSize, gridSize, gridSize)
 
-     love.graphics.setColor(1, 0.8, 0) -- Cor amarela/laranja para as baterias
+    -- 2. Aplica a máscara de escuridão (se necessário)
+    if game.currentLevelType == "dark" and game.lightTimer <= 0 then
+        local previousBlendMode = love.graphics.getBlendMode()
+        love.graphics.setColor(0, 0, 0, 0.99)
+        love.graphics.rectangle("fill", 0, 0, love.graphics.getWidth(), love.graphics.getHeight())
+        love.graphics.setBlendMode("subtract")
+        love.graphics.setColor(1, 1, 1)
+        local lightX = (player.x - 0.5) * gridSize
+        local lightY = (player.y - 0.5) * gridSize
+        love.graphics.circle("fill", lightX, lightY, gridSize * 4)
+        love.graphics.setBlendMode(previousBlendMode)
+
+        love.graphics.setColor(0.2, 0.2, 0.25, 0.8)
+        for y = 1, gridHeight do
+            for x=1, gridWidth do
+                if map[y][x] == 1 then
+                    love.graphics.rectangle("line", (x - 1) * gridSize, (y - 1) * gridSize, gridSize, gridSize)
+                end
+            end
+        end
+    end
+
+    -- 3. Desenha elementos SEMPRE visíveis (por cima da escuridão)
+    -- Baterias
+    love.graphics.setColor(1, 0.8, 0)
     for i, item in ipairs(batteries) do
         love.graphics.rectangle("fill", (item.x - 1) * gridSize + 4, (item.y - 1) * gridSize + 4, gridSize - 8, gridSize - 8)
     end
-    -- Desenha o jogador
-    love.graphics.setColor(0.2, 0.6, 1) -- Mudei a cor do jogador para um azul mais vivo
-    love.graphics.rectangle("fill", (player.x - 1) * gridSize, (player.y - 1) * gridSize, gridSize, gridSize)
-
+    -- Jogador
     if player.isStuck then
         love.graphics.setColor(1, 0.2, 0.2)
     else
         love.graphics.setColor(0.2, 0.6, 1)
     end
     love.graphics.rectangle("fill", (player.x - 1) * gridSize, (player.y - 1) * gridSize, gridSize, gridSize)
-
-    -- Desenha a UI
+    
+    if game.lightTimer > 0 then
+        love.graphics.setFont(love.graphics.newFont(20))
+        love.graphics.setColor(1, 1, 0.2)
+        local lightText = "Luz: " .. string.format("%.1f", game.lightTimer) .. "s"
+        love.graphics.printf(lightText, love.graphics.getWidth() - 120, 10, 110, "right")
+    end
+    -- 4. Desenha a UI e as mensagens de fim de jogo
     drawUI()
-
-    -- Mensagens de vitória/derrota (sem alteração)
-   if gameState == "won" then
+    if gameState == "won" then
         love.graphics.setColor(1, 1, 1)
-        love.graphics.setFont(love.graphics.newFont(32)) -- Diminuí de 40 para 32
+        love.graphics.setFont(love.graphics.newFont(32))
         love.graphics.printf("VOCÊ VENCEU!", 0, love.graphics.getHeight() / 2 - 60, love.graphics.getWidth(), "center")
-        
-        love.graphics.setFont(love.graphics.newFont(16)) -- Diminuí de 20 para 16
+        love.graphics.setFont(love.graphics.newFont(16))
         love.graphics.printf("Bateria Restante: " .. player.battery, 0, love.graphics.getHeight() / 2 - 20, love.graphics.getWidth(), "center")
         love.graphics.printf("Pontuação Total: " .. player.score, 0, love.graphics.getHeight() / 2, love.graphics.getWidth(), "center")
         love.graphics.printf("Pressione R para o próximo nível", 0, love.graphics.getHeight() / 2 + 25, love.graphics.getWidth(), "center")
     elseif gameState == "lost" then
         love.graphics.setColor(1, 0, 0)
-        love.graphics.setFont(love.graphics.newFont(32)) -- Diminuí de 40 para 32
+        love.graphics.setFont(love.graphics.newFont(32))
         love.graphics.printf("BATERIA ESGOTADA!", 0, love.graphics.getHeight() / 2 - 30, love.graphics.getWidth(), "center")
-        
-        love.graphics.setFont(love.graphics.newFont(16)) -- Diminuí de 20 para 16
+        love.graphics.setFont(love.graphics.newFont(16))
         love.graphics.setColor(1, 1, 1)
         love.graphics.printf("Aperte 'R' para reiniciar", 0, love.graphics.getHeight() / 2 + 10, love.graphics.getWidth(), "center")
-    end
-
     
+        if game.lightTimer > 0 then
+            love.graphics.setColor(1, 1, 0.2)
+            local lightText = "Luz: " .. string.format("%.1f", game.lightTimer) .. "s"
+            love.graphics.printf(lightText, love.graphics.getWidth() / 2 - 75, uiY + 20, 150, "center")
+        end
+    end
 end
 
 function drawShop()
@@ -368,8 +437,8 @@ function drawShop()
     love.graphics.printf(shopItems[1].description, 70, 180, 450, "left")
 
     -- Item 2: Shockwave
-    love.graphics.printf("[2] " .. shopItems[1].name, 50, 260, 500, "left")
-    love.graphics.printf(shopItems[2].description, 70, 180, 450, "left")
+    love.graphics.printf("[2] " .. shopItems[2].name, 50, 290, 500, "left")
+    love.graphics.printf(shopItems[2].description, 70, 320, 450, "left")
 
     love.graphics.setFont(love.graphics.newFont(20))
     love.graphics.printf("Sua escolha te levara para o proximo nivel.", 0, love.graphics.getHeight() - 80, love.graphics.getWidth(), "center")
@@ -396,14 +465,23 @@ function drawUI()
     love.graphics.setFont(love.graphics.newFont(14)) -- Fonte um pouco menor
     love.graphics.printf(player.battery .. "/" .. player.maxBattery, 10, uiY + 5, maxBatteryBarWidth, "center")
 
-    -- Movimentos (melhor posicionado)
     love.graphics.printf("Movimentos: " .. player.moves, 140, uiY + 5, 120, "left")
 
+  
     -- Instruções (compactadas)
-    love.graphics.printf("[Space] Quebrar (" .. abilityCost .. ")", 270, uiY + 5, 180, "left")
+   
 
     -- Pontuação (melhor alinhada)
     love.graphics.printf("Pontuação: " .. player.score, love.graphics.getWidth() - 150, uiY + 5, 140, "right")
 
     love.graphics.printf("Nivel: " .. game.level, 140, uiY + 20, 120, "left")
+
+     if player.abilityCooldown > 0 then
+        love.graphics.setColor(1, 0.4, 0.4)
+        local cooldownText = "Recarregando: " .. string.format("%.1f", player.abilityCooldown) .. "s"
+        love.graphics.printf(cooldownText, 270, uiY + 5, 180, "left")
+    else
+        love.graphics.setColor(1, 1, 1)
+        love.graphics.printf("[Space] Quebrar (" .. abilityCost .. ")", 270, uiY + 5, 180, "left")
+    end
 end
