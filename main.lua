@@ -12,6 +12,15 @@ function love.load()
     love.window.setMode(gridWidth * gridSize, gridHeight * gridSize + 40)
     love.window.setTitle("Worn Out")
 
+    colors = {
+        background = {75, 105, 47},
+        foreground = {0, 0, 0},
+        dark_wall = {20, 30, 15},
+        player = {0, 0, 0},
+        player_stuck = {170, 0, 0},
+        light_timer = {15, 45, 0}
+    }
+
     game = {
         level = 0,
         shopInterval = 5,
@@ -173,7 +182,7 @@ end
 
 function love.update(dt)
     if gameState == "playing" then
-        decayTimer = decayTimer + dt
+        decayTimer = decayTimer + dt*5
 
         if decayTimer >= decayInterval then
             player.battery = player.battery - 1
@@ -216,6 +225,9 @@ function love.keypressed(key)
             choiceMade = true
         elseif key == "2" then
             player.abilityRange = player.abilityRange + 1
+            choiceMade = true
+        elseif key == "3" then
+            player.visionRange = player.visionRange + 3
             choiceMade = true
         end
 
@@ -329,19 +341,19 @@ function love.draw()
         return
     end
     
-    love.graphics.clear(0.15, 0.15, 0.15)
+    love.graphics.clear(colors.background[1]/255, colors.background[2]/255, colors.background[3]/255)
 
     -- 1. Desenha o cenário e itens que podem ser escondidos
     -- Mapa e Grade
+    love.graphics.setColor(colors.foreground)
     for y=1, gridHeight do
         for x=1, gridWidth do
             if map[y][x] == 1 then
-                love.graphics.setColor(0.5, 0.5, 0.5)
                 love.graphics.rectangle("fill", (x - 1) * gridSize, (y - 1) * gridSize, gridSize, gridSize)
             end
         end
     end
-    love.graphics.setColor(0.2, 0.2, 0.2)
+    love.graphics.setColor(colors.dark_wall[1]/255, colors.dark_wall[2]/255, colors.dark_wall[3]/255)
     for i = 1, gridWidth do
         love.graphics.line(i * gridSize, 0, i * gridSize, gridHeight * gridSize)
     end
@@ -349,7 +361,7 @@ function love.draw()
         love.graphics.line(0, i * gridSize, gridWidth * gridSize, i * gridSize)
     end
     -- Armadilhas e Objetivo
-    love.graphics.setColor(0.6, 0.2, 0.8, 0.8)
+    love.graphics.setColor(colors.foreground)
     for _, trap in ipairs(traps) do
         love.graphics.circle("fill", (trap.x - 1) * gridSize + gridSize / 2, (trap.y - 1) * gridSize + gridSize / 2, gridSize / 3 )
     end
@@ -368,9 +380,13 @@ function love.draw()
         love.graphics.circle("fill", lightX, lightY, gridSize * 4)
         love.graphics.setBlendMode(previousBlendMode)
 
-        love.graphics.setColor(0.2, 0.2, 0.25, 0.8)
-        for y = 1, gridHeight do
-            for x=1, gridWidth do
+        love.graphics.setColor(colors.dark_wall[1]/255, colors.dark_wall[2]/255, colors.dark_wall[3]/255)
+        local startX = math.max(1, player.x - player.visionRange)
+        local endX = math.min(gridWidth, player.x + player.visionRange)
+        local startY = math.max(1, player.y - player.visionRange)
+        local endY = math.min(gridHeight, player.y + player.visionRange)
+        for y = startY, endY do
+            for x= startX, endX do
                 if map[y][x] == 1 then
                     love.graphics.rectangle("line", (x - 1) * gridSize, (y - 1) * gridSize, gridSize, gridSize)
                 end
@@ -380,28 +396,28 @@ function love.draw()
 
     -- 3. Desenha elementos SEMPRE visíveis (por cima da escuridão)
     -- Baterias
-    love.graphics.setColor(1, 0.8, 0)
+    love.graphics.setColor(colors.foreground)
     for i, item in ipairs(batteries) do
         love.graphics.rectangle("fill", (item.x - 1) * gridSize + 4, (item.y - 1) * gridSize + 4, gridSize - 8, gridSize - 8)
     end
     -- Jogador
     if player.isStuck then
-        love.graphics.setColor(1, 0.2, 0.2)
+        love.graphics.setColor(colors.player_stuck[1]/255, colors.player_stuck[2]/255, colors.player_stuck[3]/255)
     else
-        love.graphics.setColor(0.2, 0.6, 1)
+        love.graphics.setColor(colors.player)
     end
     love.graphics.rectangle("fill", (player.x - 1) * gridSize, (player.y - 1) * gridSize, gridSize, gridSize)
     
     if game.lightTimer > 0 then
         love.graphics.setFont(love.graphics.newFont(20))
-        love.graphics.setColor(1, 1, 0.2)
+        love.graphics.setColor(colors.light_timer[1]/255, colors.light_timer[2]/255, colors.light_timer[3]/255)
         local lightText = "Luz: " .. string.format("%.1f", game.lightTimer) .. "s"
         love.graphics.printf(lightText, love.graphics.getWidth() - 120, 10, 110, "right")
     end
     -- 4. Desenha a UI e as mensagens de fim de jogo
     drawUI()
     if gameState == "won" then
-        love.graphics.setColor(1, 1, 1)
+        love.graphics.setColor(colors.foreground)
         love.graphics.setFont(love.graphics.newFont(32))
         love.graphics.printf("VOCÊ VENCEU!", 0, love.graphics.getHeight() / 2 - 60, love.graphics.getWidth(), "center")
         love.graphics.setFont(love.graphics.newFont(16))
@@ -409,7 +425,7 @@ function love.draw()
         love.graphics.printf("Pontuação Total: " .. player.score, 0, love.graphics.getHeight() / 2, love.graphics.getWidth(), "center")
         love.graphics.printf("Pressione R para o próximo nível", 0, love.graphics.getHeight() / 2 + 25, love.graphics.getWidth(), "center")
     elseif gameState == "lost" then
-        love.graphics.setColor(1, 0, 0)
+        love.graphics.setColor(colors.foreground)
         love.graphics.setFont(love.graphics.newFont(32))
         love.graphics.printf("BATERIA ESGOTADA!", 0, love.graphics.getHeight() / 2 - 30, love.graphics.getWidth(), "center")
         love.graphics.setFont(love.graphics.newFont(16))
@@ -425,22 +441,25 @@ function love.draw()
 end
 
 function drawShop()
-    love.graphics.clear(0.1, 0.1, 0.2)
+    love.graphics.clear(colors.foreground[1]/255, colors.foreground[2]/255, colors.foreground[3]/255)
 
-    love.graphics.setColor(1, 1, 1)
+    love.graphics.setColor(colors.background[1]/255, colors.background[2]/255, colors.background[3]/255)
     love.graphics.setFont(love.graphics.newFont(32))
     love.graphics.printf("LOJA DE UPGRADES", 0, 40, love.graphics.getWidth(), "center")
 
     love.graphics.setFont(love.graphics.newFont(16))
     -- Item 1: Powerbank
-    love.graphics.printf("[1] " .. shopItems[1].name, 50, 150, 500, "left")
-    love.graphics.printf(shopItems[1].description, 70, 180, 450, "left")
+    love.graphics.printf("[1] " .. shopItems[1].name, 50, 130, 500, "left")
+    love.graphics.printf(shopItems[1].description, 70, 160, 450, "left")
 
     -- Item 2: Shockwave
-    love.graphics.printf("[2] " .. shopItems[2].name, 50, 290, 500, "left")
-    love.graphics.printf(shopItems[2].description, 70, 320, 450, "left")
+    love.graphics.printf("[2] " .. shopItems[2].name, 50, 220, 500, "left")
+    love.graphics.printf(shopItems[2].description, 70, 250, 450, "left")
 
-    love.graphics.setFont(love.graphics.newFont(20))
+    -- Item 3: Scanner
+    love.graphics.printf("[3] " .. shopItems[3].name, 50, 310, 500, "left")
+    love.graphics.printf(shopItems[3].description, 70, 340, 450, "left")
+
     love.graphics.printf("Sua escolha te levara para o proximo nivel.", 0, love.graphics.getHeight() - 80, love.graphics.getWidth(), "center")
 end
 
@@ -448,11 +467,11 @@ end
 function drawUI()
     local uiY = gridHeight * gridSize + 5
 
-    love.graphics.setColor(0.1, 0.1, 0.1)
+    love.graphics.setColor(colors.foreground)
     love.graphics.rectangle("fill", 0, gridHeight * gridSize, love.graphics.getWidth(), 40)
 
     -- Bateria (diminuída)
-    love.graphics.setColor(1, 0, 0)
+    love.graphics.setColor(colors.dark_wall[1]/255, colors.dark_wall[2]/255, colors.dark_wall[3]/255)
     local maxBatteryBarWidth = 120 -- Diminuído de 200 para 120
     love.graphics.rectangle("fill", 10, uiY, maxBatteryBarWidth, 25) -- Altura também diminuída
 
@@ -461,7 +480,7 @@ function drawUI()
     love.graphics.rectangle("fill", 10, uiY, batteryWidth, 25)
 
     -- Texto da bateria
-    love.graphics.setColor(1, 1, 1)
+    love.graphics.setColor(colors.background[1]/255, colors.background[2]/255, colors.background[3]/255)
     love.graphics.setFont(love.graphics.newFont(14)) -- Fonte um pouco menor
     love.graphics.printf(player.battery .. "/" .. player.maxBattery, 10, uiY + 5, maxBatteryBarWidth, "center")
 
@@ -477,7 +496,7 @@ function drawUI()
     love.graphics.printf("Nivel: " .. game.level, 140, uiY + 20, 120, "left")
 
      if player.abilityCooldown > 0 then
-        love.graphics.setColor(1, 0.4, 0.4)
+        love.graphics.setColor(colors.player_stuck[1]/255, colors.player_stuck[2]/255, colors.player_stuck[3]/255)
         local cooldownText = "Recarregando: " .. string.format("%.1f", player.abilityCooldown) .. "s"
         love.graphics.printf(cooldownText, 270, uiY + 5, 180, "left")
     else
