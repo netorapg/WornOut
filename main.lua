@@ -221,7 +221,7 @@ end
 
 function love.update(dt)
     if gameState == "playing" then
-        decayTimer = decayTimer + dt*5
+        decayTimer = decayTimer + dt
 
         if decayTimer >= decayInterval then
             player.battery = player.battery - 1
@@ -467,7 +467,7 @@ function love.draw()
     -- 4. Desenha a UI e as mensagens de fim de jogo
     drawUI()
     if gameState == "won" then
-        love.graphics.setColor(colors.foreground)
+        love.graphics.setColor(255, 255, 255)
         love.graphics.setFont(love.graphics.newFont(32))
         love.graphics.printf("VOCÊ VENCEU!", 0, love.graphics.getHeight() / 2 - 60, love.graphics.getWidth(), "center")
         love.graphics.setFont(love.graphics.newFont(16))
