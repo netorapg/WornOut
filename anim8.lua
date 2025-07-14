@@ -1,275 +1,302 @@
--- Copyright (c) 2014, Enrique García Cota
--- All rights reserved.
--- 
--- Redistribution and use in source and binary forms, with or without
--- modification, are permitted provided that the following conditions are met:
--- 
--- * Redistributions of source code must retain the above copyright notice, this
---   list of conditions and the following disclaimer.
--- 
--- * Redistributions in binary form must reproduce the above copyright notice,
---   this list of conditions and the following disclaimer in the documentation
---   and/or other materials provided with the distribution.
--- 
--- THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
--- AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
--- IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
--- DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
--- FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
--- DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
--- SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
--- CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
--- OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
--- OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+local anim8 = {
+  _VERSION     = 'anim8 v2.3.1',
+  _DESCRIPTION = 'An animation library for LÖVE',
+  _URL         = 'https://github.com/kikito/anim8',
+  _LICENSE     = [[
+    MIT LICENSE
 
-local anim8 = {}
-anim8.__index = anim8
-anim8.VERSION = "v2.1.0"
+    Copyright (c) 2011 Enrique García Cota
 
--- local function getDimensions(image)
---   if type(image.getDimensions) == 'function' then
---     return image:getDimensions()
---   end
---   return image:getWidth(), image:getHeight()
--- end
+    Permission is hereby granted, free of charge, to any person obtaining a
+    copy of this software and associated documentation files (the
+    "Software"), to deal in the Software without restriction, including
+    without limitation the rights to use, copy, modify, merge, publish,
+    distribute, sublicense, and/or sell copies of the Software, and to
+    permit persons to whom the Software is furnished to do so, subject to
+    the following conditions:
 
-local function newImage(image)
-  if type(image) == "string" then
-    return love.graphics.newImage(image)
-  end
-  return image
-end
+    The above copyright notice and this permission notice shall be included
+    in all copies or substantial portions of the Software.
 
-local Grid = {}
-Grid.__index = Grid
-
-function Grid:get(left, top, width, height)
-  width = width or self.width
-  height = height or self.height
-  return love.graphics.newQuad(left - 1, top - 1, width, height, self.image:getDimensions())
-end
-
-local a = {}
-function a.right(f) return function(x,y,w,h) return f(x+w,y) end end
-function a.left (f) return function(x,y,w,h) return f(x-w,y) end end
-function a.down (f) return function(x,y,w,h) return f(x,y+h) end end
-function a.up   (f) return function(x,y,w,h) return f(x,y-h) end end
-
-local moves = {
-  right = function(x,y,w,h) return x+w, y   end,
-  left  = function(x,y,w,h) return x-w, y   end,
-  down  = function(x,y,w,h) return x,   y+h end,
-  up    = function(x,y,w,h) return x,   y-w end
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+    OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+    MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+    IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+    CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+    TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+    SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+  ]]
 }
 
-local function parseSequence(str)
-  local sequence, subseq, f, t, s, a, b, c, d
-  sequence = {}
-  for f,t,s in str:gmatch("(%d+)%-(%d+)(%.%d+)") do
-    table.insert(sequence, {tonumber(f), tonumber(t), tonumber(s)})
+local Grid = {}
+
+local _frames = {}
+
+local function assertPositiveInteger(value, name)
+  if type(value) ~= 'number' then error(("%s should be a number, was %q"):format(name, tostring(value))) end
+  if value < 1 then error(("%s should be a positive number, was %d"):format(name, value)) end
+  if value ~= math.floor(value) then error(("%s should be an integer, was %f"):format(name, value)) end
+end
+
+local function createFrame(self, x, y)
+  local fw, fh = self.frameWidth, self.frameHeight
+  return love.graphics.newQuad(
+    self.left + (x-1) * fw + x * self.border,
+    self.top  + (y-1) * fh + y * self.border,
+    fw,
+    fh,
+    self.imageWidth,
+    self.imageHeight
+  )
+end
+
+local function getGridKey(...)
+  return table.concat( {...} ,'-' )
+end
+
+local function getOrCreateFrame(self, x, y)
+  if x < 1 or x > self.width or y < 1 or y > self.height then
+    error(("There is no frame for x=%d, y=%d"):format(x, y))
   end
+  local key = self._key
+  _frames[key]       = _frames[key]       or {}
+  _frames[key][x]    = _frames[key][x]    or {}
+  _frames[key][x][y] = _frames[key][x][y] or createFrame(self, x, y)
+  return _frames[key][x][y]
+end
 
-  if #sequence > 0 then return sequence end
-
-  for f,t,s in str:gmatch("(%d+)%-(%d+)([%a,]+)") do
-    subseq = {}
-    for a in s:gmatch("([%a,]+)") do
-      if a~=',' then table.insert(subseq, moves[a]) end
-    end
-    table.insert(sequence, {tonumber(f), tonumber(t), subseq})
-  end
-
-  if #sequence > 0 then return sequence end
-
-  for f, t in str:gmatch("(%d+)%-(%d+)") do
-    table.insert(sequence, {tonumber(f), tonumber(t)})
-  end
-
-  if #sequence > 0 then return sequence end
-
-  for f in str:gmatch("(%d+)") do
-    table.insert(sequence, {tonumber(f)})
-  end
-  return sequence
+local function parseInterval(str)
+  if type(str) == "number" then return str,str,1 end
+  str = str:gsub('%s', '') -- remove spaces
+  local min, max = str:match("^(%d+)-(%d+)$")
+  assert(min and max, ("Could not parse interval from %q"):format(str))
+  min, max = tonumber(min), tonumber(max)
+  local step = min <= max and 1 or -1
+  return min, max, step
 end
 
 function Grid:getFrames(...)
-  local frames, f, t, s, all, seq, x, y, dx, dy, w, h
-  frames, all = {}, {...}
-  dx, dy = self.left, self.top
-  w, h = self.width, self.height
+  local result, args = {}, {...}
+  local minx, maxx, stepx, miny, maxy, stepy
 
-  for i=1,#all do
-    seq = parseSequence(all[i])
-    for j=1,#seq do
-      f,t,s = seq[j][1], seq[j][2], seq[j][3]
-      t = t or f
-      if s then
-        x,y = self:getFramePosition(f)
-        for k=f, t do
-          table.insert(frames, self:get(x,y,w,h))
-          if type(s) == 'number' then
-            x,y = x+w*s, y
-          else
-            for l=1, #s do
-              x,y = s[l](x,y,w,h)
-            end
-          end
-        end
-      else
-        for k=f,t do
-          table.insert(frames, self[k])
-        end
+  for i=1, #args, 2 do
+    minx, maxx, stepx = parseInterval(args[i])
+    miny, maxy, stepy = parseInterval(args[i+1])
+    for y = miny, maxy, stepy do
+      for x = minx, maxx, stepx do
+        result[#result+1] = getOrCreateFrame(self,x,y)
       end
     end
   end
 
-  return frames
+  return result
 end
 
-function Grid:getFramePosition(frame)
-  return self.left + ((frame-1) % self.cols) * self.width,
-         self.top  + math.floor((frame-1) / self.cols) * self.height
+local Gridmt = {
+  __index = Grid,
+  __call  = Grid.getFrames
+}
+
+local function newGrid(frameWidth, frameHeight, imageWidth, imageHeight, left, top, border)
+  assertPositiveInteger(frameWidth,  "frameWidth")
+  assertPositiveInteger(frameHeight, "frameHeight")
+  assertPositiveInteger(imageWidth,  "imageWidth")
+  assertPositiveInteger(imageHeight, "imageHeight")
+
+  left   = left   or 0
+  top    = top    or 0
+  border = border or 0
+
+  local key  = getGridKey(frameWidth, frameHeight, imageWidth, imageHeight, left, top, border)
+
+  local grid = setmetatable(
+    { frameWidth  = frameWidth,
+      frameHeight = frameHeight,
+      imageWidth  = imageWidth,
+      imageHeight = imageHeight,
+      left        = left,
+      top         = top,
+      border      = border,
+      width       = math.floor(imageWidth/frameWidth),
+      height      = math.floor(imageHeight/frameHeight),
+      _key        = key
+    },
+    Gridmt
+  )
+  return grid
 end
+
+-----------------------------------------------------------
 
 local Animation = {}
-Animation.__index = Animation
+
+local function cloneArray(arr)
+  local result = {}
+  for i=1,#arr do result[i] = arr[i] end
+  return result
+end
+
+local function parseDurations(durations, frameCount)
+  local result = {}
+  if type(durations) == 'number' then
+    for i=1,frameCount do result[i] = durations end
+  else
+    local min, max, step
+    for key,duration in pairs(durations) do
+      assert(type(duration) == 'number', "The value [" .. tostring(duration) .. "] should be a number")
+      min, max, step = parseInterval(key)
+      for i = min,max,step do result[i] = duration end
+    end
+  end
+
+  if #result < frameCount then
+    error("The durations table has length of " .. tostring(#result) .. ", but it should be >= " .. tostring(frameCount))
+  end
+
+  return result
+end
+
+local function parseIntervals(durations)
+  local result, time = {0},0
+  for i=1,#durations do
+    time = time + durations[i]
+    result[i+1] = time
+  end
+  return result, time
+end
+
+local Animationmt = { __index = Animation }
+local nop = function() end
+
+local function newAnimation(frames, durations, onLoop)
+  local td = type(durations);
+  if (td ~= 'number' or durations <= 0) and td ~= 'table' then
+    error("durations must be a positive number. Was " .. tostring(durations) )
+  end
+  onLoop = onLoop or nop
+  durations = parseDurations(durations, #frames)
+  local intervals, totalDuration = parseIntervals(durations)
+  return setmetatable({
+      frames         = cloneArray(frames),
+      durations      = durations,
+      intervals      = intervals,
+      totalDuration  = totalDuration,
+      onLoop         = onLoop,
+      timer          = 0,
+      position       = 1,
+      status         = "playing",
+      flippedH       = false,
+      flippedV       = false
+    },
+    Animationmt
+  )
+end
 
 function Animation:clone()
-  local new = setmetatable({
-    grid       = self.grid,
-    frames     = self.frames,
-    durations  = self.durations,
-    onLoop     = self.onLoop,
-    loops      = 0,
-    position   = 1,
-    timer      = 0,
-    status     = 'playing'
-  }, anim8)
+  local newAnim = newAnimation(self.frames, self.durations, self.onLoop)
+  newAnim.flippedH, newAnim.flippedV = self.flippedH, self.flippedV
+  return newAnim
+end
 
-  new.totalFrames = #self.frames
+function Animation:flipH()
+  self.flippedH = not self.flippedH
+  return self
+end
 
-  return new
+function Animation:flipV()
+  self.flippedV = not self.flippedV
+  return self
+end
+
+local function seekFrameIndex(intervals, timer)
+  local high, low, i = #intervals-1, 1, 1
+
+  while(low <= high) do
+    i = math.floor((low + high) / 2)
+    if     timer >= intervals[i+1] then low  = i + 1
+    elseif timer <  intervals[i]   then high = i - 1
+    else
+      return i
+    end
+  end
+
+  return i
 end
 
 function Animation:update(dt)
-  if self.status ~= 'playing' then return end
+  if self.status ~= "playing" then return end
 
   self.timer = self.timer + dt
-  local d = self.durations[self.position] or self.durations[1]
-
-  while self.timer >= d do
-    self.timer = self.timer - d
-
-    self.position = self.position + 1
-    if self.position > self.totalFrames then
-      self.loops = self.loops + 1
-      if self.onLoop == 'pause' or (type(self.onLoop) == 'number' and self.loops >= self.onLoop) then
-        self.position = self.totalFrames
-        self:pause()
-      else
-        self.position = 1
-        if type(self.onLoop) == "function" then
-          self.onLoop(self)
-        end
-      end
-    end
-    d = self.durations[self.position] or self.durations[1]
+  local loops = math.floor(self.timer / self.totalDuration)
+  if loops ~= 0 then
+    self.timer = self.timer - self.totalDuration * loops
+    local f = type(self.onLoop) == 'function' and self.onLoop or self[self.onLoop]
+    f(self, loops)
   end
-end
 
-function Animation:gotoFrame(f)
-  self.position = f
-end
-
-function Animation:draw(image, x, y, r, sx, sy, ox, oy, kx, ky)
-  love.graphics.draw(image, self.frames[self.position], x, y, r, sx, sy, ox, oy, kx, ky)
+  self.position = seekFrameIndex(self.intervals, self.timer)
 end
 
 function Animation:pause()
-  self.status = 'paused'
+  self.status = "paused"
+end
+
+function Animation:gotoFrame(position)
+  self.position = position
+  self.timer = self.intervals[self.position]
+end
+
+function Animation:pauseAtEnd()
+  self.position = #self.frames
+  self.timer = self.totalDuration
+  self:pause()
+end
+
+function Animation:pauseAtStart()
+  self.position = 1
+  self.timer = 0
+  self:pause()
 end
 
 function Animation:resume()
-  self.status = 'playing'
+  self.status = "playing"
+end
+
+function Animation:draw(image, x, y, r, sx, sy, ox, oy, kx, ky)
+  love.graphics.draw(image, self:getFrameInfo(x, y, r, sx, sy, ox, oy, kx, ky))
+end
+
+function Animation:getFrameInfo(x, y, r, sx, sy, ox, oy, kx, ky)
+  local frame = self.frames[self.position]
+  if self.flippedH or self.flippedV then
+    r,sx,sy,ox,oy,kx,ky = r or 0, sx or 1, sy or 1, ox or 0, oy or 0, kx or 0, ky or 0
+    local _,_,w,h = frame:getViewport()
+
+    if self.flippedH then
+      sx = sx * -1
+      ox = w - ox
+      kx = kx * -1
+      ky = ky * -1
+    end
+
+    if self.flippedV then
+      sy = sy * -1
+      oy = h - oy
+      kx = kx * -1
+      ky = ky * -1
+    end
+  end
+  return frame, x, y, r, sx, sy, ox, oy, kx, ky
 end
 
 function Animation:getDimensions()
-  return self.frames[self.position]:getViewport()
+  local _,_,w,h = self.frames[self.position]:getViewport()
+  return w,h
 end
 
-function Animation:getFrame()
-  return self.frames[self.position]
-end
+-----------------------------------------------------------
 
-function Animation:getDuration()
-  local total_duration = 0
-  for i=1, #self.durations do
-    total_duration = total_duration + self.durations[i]
-  end
-  return total_duration
-end
-
-function anim8.newGrid(frameWidth, frameHeight, imageWidth, imageHeight, left, top)
-  left = left or 1
-  top = top or 1
-  local image = newImage(imageWidth)
-  local imageW, imageH
-  if type(image) == 'userdata' then
-    imageW, imageH = image:getDimensions()
-  else
-    imageW, imageH = imageWidth, imageHeight
-    image = nil
-  end
-
-  local g = {
-    width  = frameWidth,
-    height = frameHeight,
-    left   = left,
-    top    = top,
-    cols   = math.floor((imageW - left + 1) / frameWidth),
-    rows   = math.floor((imageH - top  + 1) / frameHeight),
-    image  = image
-  }
-  setmetatable(g, Grid)
-
-  for i=1, g.rows * g.cols do
-    local x,y = g:getFramePosition(i)
-    g[i] = g:get(x,y)
-  end
-
-  return function(...) return g:getFrames(...) end
-end
-
-function anim8.newAnimation(frames, durations, onLoop)
-  if type(frames) == "function" then
-    return function(f, d, o) return anim8.newAnimation(frames(f), d, o) end
-  end
-
-  local d, a
-  if type(durations) == 'number' then
-    d = {}
-    for i=1, #frames do
-      d[i] = durations
-    end
-  else
-    d = durations or {1}
-  end
-
-  a = {
-    grid       = frames.grid,
-    frames     = frames,
-    durations  = d,
-    onLoop     = onLoop,
-    position   = 1,
-    timer      = 0,
-    loops      = 0,
-    status     = 'playing'
-  }
-
-  a.totalFrames = #frames
-  setmetatable(a, Animation)
-  return a
-end
+anim8.newGrid       = newGrid
+anim8.newAnimation  = newAnimation
 
 return anim8

@@ -1,3 +1,4 @@
+local anim8 = require 'anim8'
 function generateLevel() end
 function chekItemCollection() end
 function startNextLevel() end
@@ -11,14 +12,36 @@ function love.load()
 
     love.window.setMode(gridWidth * gridSize, gridHeight * gridSize + 40)
     love.window.setTitle("Worn Out")
+    
+    -- 1. Carrega a imagem e cria o grid (usando as dimensões para a nova anim8)
+    local spritesheet = love.graphics.newImage("assets/sprite_sheet.png")
+    local g = anim8.newGrid(20, 20, spritesheet:getWidth(), spritesheet:getHeight())
 
+    -- 2. Define a tabela 'sprites' PRIMEIRO E COMPLETAMENTE
+    sprites = {
+        sheet = spritesheet,
+        objetivo = g(2, 3)[1],
+        bateria  = g(3, 3)[1],
+        armadilha = g(3, 5)[1],
+        loja_powerbank = g(1, 6)[1],
+        loja_shockwave = g(2, 6)[1],
+        loja_scanner   = g(3, 6)[1]
+    }
+    sprites.player = {
+        idle    = anim8.newAnimation( g('2-3', 1), 0.25 ),
+        preso   = anim8.newAnimation( g(4, 1), 0.3 ),
+        morto   = anim8.newAnimation( g('1-2', 2), 1 ),
+        impulso = anim8.newAnimation( g('4-4', 1), 0.1, 'pauseAtEnd' )
+    }
+    
+    -- 3. Define as outras tabelas
     colors = {
         background = {75, 105, 47},
         foreground = {0, 0, 0},
         dark_wall = {20, 30, 15},
-        player = {0, 0, 0},
         player_stuck = {170, 0, 0},
-        light_timer = {15, 45, 0}
+        light_timer = {15, 45, 0},
+        player = {255, 255, 255}  -- Adiciona a cor do jogador
     }
 
     game = {
@@ -27,20 +50,23 @@ function love.load()
         nextShopLevel = 5
     }
 
+    -- 4. Agora que 'sprites' e 'sprites.player' existem, podemos criar a tabela 'player'
     player = {
-        battery = 150, -- Aumentei um pouco a bateria para o labirinto
+        battery = 150, 
         maxBattery = 150,
         moves = 0,
         score = 0,
         abilityRange = 1,
         abilityCooldown = 0, 
-        visionRange = 6
+        visionRange = 6,
+        currentAnim = sprites.player.idle, -- Agora isso funciona!
+        boostAnimTimer = 0
     }
 
     shopItems = {
         {name="Powerbank", description="Aumenta a bateria máxima em 50."},
         {name = "Shockwave", description="Aumenta o alcance do [Space] em 1. "},
-        {name="Scanner", description="Aumenta o alcance da visao do escuro."}
+        {name="Scanner", description="Aumenta o alcance da visão no escuro."}
     }
 
     goal = {}
@@ -48,6 +74,7 @@ function love.load()
     abilityCooldownDuration = 15
     startNextLevel()
 end
+
 
 function startNextLevel()
     game.level = game.level + 1
@@ -94,6 +121,18 @@ function updatePlayerStatus()
             player.isStuck = true
             break
         end
+    end
+    updatePlayerAnimation()
+end
+
+function updatePlayerAnimation()
+    if player.boostAnimTimer > 0 then return end
+    if gameState == "lost" then
+        player.currentAnim = sprites.player.morto
+    elseif player.isStuck then
+        player.currentAnim = sprites.player.preso
+    else
+        player.currentAnim = sprites.player.idle
     end
 end
 
@@ -202,7 +241,14 @@ function love.update(dt)
         if player.abilityCooldown > 0 then
             player.abilityCooldown = player.abilityCooldown - dt
         end
+        if player.boostAnimTimer > 0 then
+            player.boostAnimTimer = player.boostAnimTimer - dt
+            if player.boostAnimTimer <= 0 then
+                updatePlayerAnimation()
+            end
+        end
     end
+    player.currentAnim:update(dt)
 end
 
 function love.keypressed(key)
@@ -272,7 +318,7 @@ function love.keypressed(key)
         if player.battery > abilityCost and player.abilityCooldown <= 0 then
             player.battery = player.battery - abilityCost
             player.abilityCooldown = abilityCooldownDuration
-
+            
                for dy = -player.abilityRange, player.abilityRange do
                 for dx = -player.abilityRange, player.abilityRange do
                     if dx == 0 and dy == 0 then
@@ -291,8 +337,12 @@ function love.keypressed(key)
                 player.battery = 0
                 gameState = "lost"
             end
+            player.currentAnim = sprites.player.impulso
+            player.currentAnim:gotoFrame(1)
+            player.boostAnimTimer = 0.1 -- Usar a duração definida na criação da animação
         end
         return
+        
     else
         return -- Sai da função se não for uma tecla de movimento
     end
@@ -366,8 +416,8 @@ function love.draw()
         love.graphics.circle("fill", (trap.x - 1) * gridSize + gridSize / 2, (trap.y - 1) * gridSize + gridSize / 2, gridSize / 3 )
     end
     love.graphics.setColor(0, 1, 0, 0.5) 
-    love.graphics.rectangle("fill", (goal.x - 1) * gridSize, (goal.y - 1) * gridSize, gridSize, gridSize)
-
+    love.graphics.draw(sprites.sheet, sprites.objetivo, (goal.x - 1) * gridSize, (goal.y - 1) * gridSize)
+    
     -- 2. Aplica a máscara de escuridão (se necessário)
     if game.currentLevelType == "dark" and game.lightTimer <= 0 then
         local previousBlendMode = love.graphics.getBlendMode()
@@ -396,17 +446,17 @@ function love.draw()
 
     -- 3. Desenha elementos SEMPRE visíveis (por cima da escuridão)
     -- Baterias
-    love.graphics.setColor(colors.foreground)
+    love.graphics.setColor(1, 1, 1) -- Define cor branca para os sprites
     for i, item in ipairs(batteries) do
-        love.graphics.rectangle("fill", (item.x - 1) * gridSize + 4, (item.y - 1) * gridSize + 4, gridSize - 8, gridSize - 8)
+        love.graphics.draw(sprites.sheet, sprites.bateria, (item.x - 1) * gridSize, (item.y - 1) * gridSize)
     end
     -- Jogador
     if player.isStuck then
         love.graphics.setColor(colors.player_stuck[1]/255, colors.player_stuck[2]/255, colors.player_stuck[3]/255)
     else
-        love.graphics.setColor(colors.player)
+        love.graphics.setColor(1, 1, 1) -- Cor branca para o jogador também
     end
-    love.graphics.rectangle("fill", (player.x - 1) * gridSize, (player.y - 1) * gridSize, gridSize, gridSize)
+    player.currentAnim:draw(sprites.sheet, (player.x - 1) * gridSize, (player.y - 1) * gridSize)
     
     if game.lightTimer > 0 then
         love.graphics.setFont(love.graphics.newFont(20))
