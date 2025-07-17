@@ -1,6 +1,6 @@
 local anim8 = require 'anim8'
 function generateLevel() end
-function chekItemCollection() end
+function checkItemCollection() end
 function startNextLevel() end
 function love.load()
     gridSize = 20
@@ -12,42 +12,42 @@ function love.load()
     love.window.setMode(gridWidth * gridSize, gridHeight * gridSize + 40)
     love.window.setTitle("Worn Out")
     
-    -- 1. Carrega a imagem e cria o grid (usando as dimensões para a nova anim8)
+    -- 1. Load image and create grid (using dimensions for new anim8)
     local spritesheet = love.graphics.newImage("assets/sprite_sheet.png")
     local g = anim8.newGrid(20, 20, spritesheet:getWidth(), spritesheet:getHeight())
 
-    -- 2. Define a tabela 'sprites' PRIMEIRO E COMPLETAMENTE
+    -- 2. Define 'sprites' table FIRST AND COMPLETELY
     sprites = {
         sheet = spritesheet,
-        objetivo = g(2, 3)[1],
-        bateria  = g(3, 3)[1],
-        armadilha = g(3, 5)[1],
-        loja_powerbank = g(1, 6)[1],
-        loja_shockwave = g(2, 6)[1],
-        loja_scanner   = g(3, 6)[1]
+        target = g(2, 3)[1],
+        battery  = g(3, 3)[1],
+        trap = g(3, 5)[1],
+        shop_powerbank = g(1, 6)[1],
+        shop_shockwave = g(2, 6)[1],
+        shop_scanner   = g(3, 6)[1]
     }
     sprites.player = {
         idle    = anim8.newAnimation( g('2-3', 1), 0.25 ),
-        preso   = anim8.newAnimation( g(4, 1), 0.3 ),
-        morto   = anim8.newAnimation( g('1-2', 2), 1 ),
-        impulso = anim8.newAnimation( g('4-4', 1), 0.1, 'pauseAtEnd' )
+        trapped   = anim8.newAnimation( g(4, 1), 0.3 ),
+        dead   = anim8.newAnimation( g('1-2', 2), 1 ),
+        impulse = anim8.newAnimation( g('4-4', 1), 0.1, 'pauseAtEnd' )
     }
     
-    -- Carrega os arquivos de áudio
+    -- Load audio files
     audio = {
         music = love.audio.newSource("assets/wornout.mp3", "stream"),
         explosion = love.audio.newSource("assets/explosion.wav", "static")
     }
     
-    -- Configura a música para tocar em loop
+    -- Configure music to loop
     audio.music:setLooping(true)
     audio.music:setVolume(0.6)
     audio.explosion:setVolume(0.8)
     
-    -- Inicia a música
+    -- Start music
     audio.music:play()
     
-    -- 3. Define as outras tabelas
+    -- 3. Define other tables
     colors = {
         background = {75, 105, 47},
         foreground = {0, 0, 0},
@@ -63,7 +63,7 @@ function love.load()
         nextShopLevel = 5
     }
 
-    -- 4. Agora que 'sprites' e 'sprites.player' existem, podemos criar a tabela 'player'
+    -- 4. Now that 'sprites' and 'sprites.player' exist, we can create 'player' table
     player = {
         battery = 150, 
         maxBattery = 150,
@@ -84,21 +84,21 @@ function love.load()
     }
 
     shopItems = {
-        {name="Powerbank", description="Aumenta a bateria máxima em 50."},
-        {name = "Shockwave", description="Aumenta o alcance do [Space] em 1. "},
-        {name="Scanner", description="Aumenta o alcance da visão no escuro."}
+        {name="Powerbank", description="Increases maximum battery by 50."},
+        {name = "Shockwave", description="Increases [Space] range by 1. "},
+        {name="Scanner", description="Increases vision range in the dark."}
     }
 
     goal = {}
     abilityCost = 25
     abilityCooldownDuration = 15
 
-    -- NOVO: Cria uma textura de pixel único para partículas coloridas
+    -- NEW: Creates single pixel texture for colored particles
     local imageData = love.image.newImageData(1, 1)
-    imageData:setPixel(0, 0, 1, 1, 1, 1) -- Pixel branco
+    imageData:setPixel(0, 0, 1, 1, 1, 1) -- White pixel
     local particleTexture = love.graphics.newImage(imageData)
 
-    -- CORRIGIDO: Configuração do sistema de partículas
+    -- FIXED: Particle system configuration
     wallDebris = love.graphics.newParticleSystem(particleTexture, 100)
     wallDebris:setParticleLifetime(0.3, 0.8)
     wallDebris:setEmissionRate(500)
@@ -117,10 +117,10 @@ function love.load()
         showText = true
     }
     
-    -- Gera labirinto de fundo para o menu
+    -- Generate background maze for menu
     generateMenuBackground()
     
-    -- Inicia no menu
+    -- Start in menu
     gameState = "menu"
 end
 
@@ -177,9 +177,9 @@ end
 function updatePlayerAnimation()
     if player.boostAnimTimer > 0 then return end
     if gameState == "lost" then
-        player.currentAnim = sprites.player.morto
+        player.currentAnim = sprites.player.dead
     elseif player.isStuck then
-        player.currentAnim = sprites.player.preso
+        player.currentAnim = sprites.player.trapped
     else
         player.currentAnim = sprites.player.idle
     end
@@ -306,7 +306,7 @@ function love.update(dt)
             end
         end
 
-        -- Atualiza o screen shake
+        -- Update screen shake
         if screenShake.duration > 0 then
             screenShake.duration = screenShake.duration - dt
             screenShake.x = (math.random() - 0.5) * screenShake.intensity
@@ -404,14 +404,14 @@ function love.keypressed(key)
         moved = true
     elseif key == "space" then
         if player.battery > abilityCost and player.abilityCooldown <= 0 then
-            -- Toca o som de explosão
-            audio.explosion:stop() -- Para o som se já estiver tocando
+            -- Play explosion sound
+            audio.explosion:stop() -- Stop sound if already playing
             audio.explosion:play()
             
             player.battery = player.battery - abilityCost
             player.abilityCooldown = abilityCooldownDuration
             
-            -- Adiciona screen shake
+            -- Add screen shake
             screenShake.duration = 0.3
             screenShake.intensity = 8
             
@@ -439,20 +439,20 @@ function love.keypressed(key)
                 player.battery = 0
                 gameState = "lost"
             end
-            player.currentAnim = sprites.player.impulso
+            player.currentAnim = sprites.player.impulse
             player.currentAnim:gotoFrame(1)
             player.boostAnimTimer = 0.1
         end
         return
         
     else
-        return -- Sai da função se não for uma tecla de movimento
+        return -- Exit function if not a movement key
     end
     
     if moved then
         if targetX >= 1 and targetX <= gridWidth and
             targetY >= 1 and targetY <= gridHeight and
-            map[targetY][targetX] ~= 1 then -- A MÁGICA ACONTECE AQUI!
+            map[targetY][targetX] ~= 1 then -- THE MAGIC HAPPENS HERE!
        
             player.x = targetX
             player.y = targetY
@@ -498,14 +498,14 @@ function love.draw()
         return
     end
     
-    -- Aplica o screen shake
+    -- Apply screen shake
     love.graphics.push()
     love.graphics.translate(screenShake.x, screenShake.y)
     
     love.graphics.clear(colors.background[1]/255, colors.background[2]/255, colors.background[3]/255)
 
-    -- 1. Desenha o cenário e itens que podem ser escondidos
-    -- Mapa e Grade
+    -- 1. Draw scenery and items that can be hidden
+    -- Map and Grid
     love.graphics.setColor(colors.foreground)
     for y=1, gridHeight do
         for x=1, gridWidth do
@@ -521,19 +521,19 @@ function love.draw()
     for i = 1, gridHeight do
         love.graphics.line(0, i * gridSize, gridWidth * gridSize, i * gridSize)
     end
-    -- Armadilhas e Objetivo
+    -- Traps and Target
     love.graphics.setColor(colors.foreground)
     for _, trap in ipairs(traps) do
         love.graphics.circle("fill", (trap.x - 1) * gridSize + gridSize / 2, (trap.y - 1) * gridSize + gridSize / 2, gridSize / 3 )
     end
     love.graphics.setColor(0, 1, 0, 0.5) 
-    love.graphics.draw(sprites.sheet, sprites.objetivo, (goal.x - 1) * gridSize, (goal.y - 1) * gridSize)
+    love.graphics.draw(sprites.sheet, sprites.target, (goal.x - 1) * gridSize, (goal.y - 1) * gridSize)
 
     for i, ps in ipairs(activeParticles) do
         love.graphics.draw(ps)
     end
     
-    -- 2. Aplica a máscara de escuridão (se necessário)
+    -- 2. Apply darkness mask (if necessary)
     if game.currentLevelType == "dark" and game.lightTimer <= 0 then
         local previousBlendMode = love.graphics.getBlendMode()
         love.graphics.setColor(0, 0, 0, 0.99)
@@ -559,52 +559,52 @@ function love.draw()
         end
     end
 
-    -- 3. Desenha elementos SEMPRE visíveis (por cima da escuridão)
-    -- Baterias
-    love.graphics.setColor(1, 1, 1) -- Define cor branca para os sprites
+    -- 3. Draw ALWAYS visible elements (on top of darkness)
+    -- Batteries
+    love.graphics.setColor(1, 1, 1) -- Set white color for sprites
     for i, item in ipairs(batteries) do
-        love.graphics.draw(sprites.sheet, sprites.bateria, (item.x - 1) * gridSize, (item.y - 1) * gridSize)
+        love.graphics.draw(sprites.sheet, sprites.battery, (item.x - 1) * gridSize, (item.y - 1) * gridSize)
     end
-    -- Jogador
+    -- Player
     if player.isStuck then
         love.graphics.setColor(colors.player_stuck[1]/255, colors.player_stuck[2]/255, colors.player_stuck[3]/255)
     else
-        love.graphics.setColor(1, 1, 1) -- Cor branca para o jogador também
+        love.graphics.setColor(1, 1, 1) -- White color for player too
     end
     player.currentAnim:draw(sprites.sheet, (player.x - 1) * gridSize, (player.y - 1) * gridSize)
     
     if game.lightTimer > 0 then
         love.graphics.setFont(love.graphics.newFont(20))
         love.graphics.setColor(colors.light_timer[1]/255, colors.light_timer[2]/255, colors.light_timer[3]/255)
-        local lightText = "Luz: " .. string.format("%.1f", game.lightTimer) .. "s"
+        local lightText = "Light: " .. string.format("%.1f", game.lightTimer) .. "s"
         love.graphics.printf(lightText, love.graphics.getWidth() - 120, 10, 110, "right")
     end
-    -- 4. Desenha a UI e as mensagens de fim de jogo
+    -- 4. Draw UI and end game messages
     drawUI()
     if gameState == "won" then
         love.graphics.setColor(255, 255, 255)
         love.graphics.setFont(love.graphics.newFont(32))
-        love.graphics.printf("VOCÊ VENCEU!", 0, love.graphics.getHeight() / 2 - 60, love.graphics.getWidth(), "center")
+        love.graphics.printf("YOU WON!", 0, love.graphics.getHeight() / 2 - 60, love.graphics.getWidth(), "center")
         love.graphics.setFont(love.graphics.newFont(16))
-        love.graphics.printf("Bateria Restante: " .. player.battery, 0, love.graphics.getHeight() / 2 - 20, love.graphics.getWidth(), "center")
-        love.graphics.printf("Pontuação Total: " .. player.score, 0, love.graphics.getHeight() / 2, love.graphics.getWidth(), "center")
-        love.graphics.printf("Pressione R para o próximo nível", 0, love.graphics.getHeight() / 2 + 25, love.graphics.getWidth(), "center")
+        love.graphics.printf("Remaining Battery: " .. player.battery, 0, love.graphics.getHeight() / 2 - 20, love.graphics.getWidth(), "center")
+        love.graphics.printf("Total Score: " .. player.score, 0, love.graphics.getHeight() / 2, love.graphics.getWidth(), "center")
+        love.graphics.printf("Press R for next level", 0, love.graphics.getHeight() / 2 + 25, love.graphics.getWidth(), "center")
     elseif gameState == "lost" then
         love.graphics.setColor(colors.foreground)
         love.graphics.setFont(love.graphics.newFont(32))
-        love.graphics.printf("BATERIA ESGOTADA!", 0, love.graphics.getHeight() / 2 - 30, love.graphics.getWidth(), "center")
+        love.graphics.printf("BATTERY DEPLETED!", 0, love.graphics.getHeight() / 2 - 30, love.graphics.getWidth(), "center")
         love.graphics.setFont(love.graphics.newFont(16))
         love.graphics.setColor(1, 1, 1)
-        love.graphics.printf("Aperte 'R' para reiniciar", 0, love.graphics.getHeight() / 2 + 10, love.graphics.getWidth(), "center")
+        love.graphics.printf("Press 'R' to restart", 0, love.graphics.getHeight() / 2 + 10, love.graphics.getWidth(), "center")
     
         if game.lightTimer > 0 then
             love.graphics.setColor(1, 1, 0.2)
-            local lightText = "Luz: " .. string.format("%.1f", game.lightTimer) .. "s"
+            local lightText = "Light: " .. string.format("%.1f", game.lightTimer) .. "s"
             love.graphics.printf(lightText, love.graphics.getWidth() / 2 - 75, uiY + 20, 150, "center")
         end
     end
     
-    love.graphics.pop() -- Remove o screen shake transformation
+    love.graphics.pop() -- Remove screen shake transformation
 end
 
 function drawShop()
@@ -612,7 +612,7 @@ function drawShop()
 
     love.graphics.setColor(colors.background[1]/255, colors.background[2]/255, colors.background[3]/255)
     love.graphics.setFont(love.graphics.newFont(32))
-    love.graphics.printf("LOJA DE UPGRADES", 0, 40, love.graphics.getWidth(), "center")
+    love.graphics.printf("UPGRADE SHOP", 0, 40, love.graphics.getWidth(), "center")
 
     love.graphics.setFont(love.graphics.newFont(16))
     -- Item 1: Powerbank
@@ -627,14 +627,14 @@ function drawShop()
     love.graphics.printf("[3] " .. shopItems[3].name, 50, 310, 500, "left")
     love.graphics.printf(shopItems[3].description, 70, 340, 450, "left")
 
-    love.graphics.printf("Sua escolha te levara para o proximo nivel.", 0, love.graphics.getHeight() - 80, love.graphics.getWidth(), "center")
+    love.graphics.printf("Your choice will take you to the next level.", 0, love.graphics.getHeight() - 80, love.graphics.getWidth(), "center")
 end
 
 function drawMenu()
-    -- Desenha o labirinto de fundo
+    -- Draw background maze
     love.graphics.clear(colors.background[1]/255, colors.background[2]/255, colors.background[3]/255)
     
-    -- Desenha o labirinto com transparência
+    -- Draw maze with transparency
     love.graphics.setColor(colors.foreground[1]/255, colors.foreground[2]/255, colors.foreground[3]/255, 0.3)
     for y = 1, gridHeight do
         for x = 1, gridWidth do
@@ -644,7 +644,7 @@ function drawMenu()
         end
     end
     
-    -- Grade do labirinto
+    -- Maze grid
     love.graphics.setColor(colors.dark_wall[1]/255, colors.dark_wall[2]/255, colors.dark_wall[3]/255, 0.2)
     for i = 1, gridWidth do
         love.graphics.line(i * gridSize, 0, i * gridSize, gridHeight * gridSize)
@@ -653,32 +653,32 @@ function drawMenu()
         love.graphics.line(0, i * gridSize, gridWidth * gridSize, i * gridSize)
     end
     
-    -- Overlay escuro para melhor legibilidade do texto
+    -- Dark overlay for better text readability
     love.graphics.setColor(0, 0, 0, 0.6)
     love.graphics.rectangle("fill", 0, 0, love.graphics.getWidth(), love.graphics.getHeight())
     
-    -- Título do jogo
+    -- Game title
     love.graphics.setColor(1, 1, 1)
     love.graphics.setFont(love.graphics.newFont(48))
     love.graphics.printf("WORN OUT", 0, love.graphics.getHeight() / 2 - 150, love.graphics.getWidth(), "center")
     
-    -- Subtítulo
+    -- Subtitle
     love.graphics.setFont(love.graphics.newFont(20))
     love.graphics.setColor(0.8, 0.8, 0.8)
-    love.graphics.printf("Escape o labirinto antes que sua bateria acabe", 0, love.graphics.getHeight() / 2 - 80, love.graphics.getWidth(), "center")
+    love.graphics.printf("Escape the maze before your battery runs out", 0, love.graphics.getHeight() / 2 - 80, love.graphics.getWidth(), "center")
     
-    -- Texto piscante "Press Start"
+    -- Blinking "Press Start" text
     if menu.showText then
         love.graphics.setFont(love.graphics.newFont(24))
         love.graphics.setColor(1, 1, 0)
-        love.graphics.printf("PRESSIONE ESPAÇO PARA COMEÇAR", 0, love.graphics.getHeight() / 2 + 20, love.graphics.getWidth(), "center")
+        love.graphics.printf("PRESS SPACE TO START", 0, love.graphics.getHeight() / 2 + 20, love.graphics.getWidth(), "center")
     end
     
-    -- Controles
+    -- Controls
     love.graphics.setFont(love.graphics.newFont(16))
     love.graphics.setColor(0.7, 0.7, 0.7)
-    love.graphics.printf("SETAS: Mover | ESPAÇO: Quebrar paredes", 0, love.graphics.getHeight() - 60, love.graphics.getWidth(), "center")
-    love.graphics.printf("Colete baterias para sobreviver!", 0, love.graphics.getHeight() - 40, love.graphics.getWidth(), "center")
+    love.graphics.printf("ARROWS: Move | SPACE: Break walls", 0, love.graphics.getHeight() - 60, love.graphics.getWidth(), "center")
+    love.graphics.printf("Collect batteries to survive!", 0, love.graphics.getHeight() - 40, love.graphics.getWidth(), "center")
 end
 
 function drawUI()
@@ -687,38 +687,34 @@ function drawUI()
     love.graphics.setColor(colors.foreground)
     love.graphics.rectangle("fill", 0, gridHeight * gridSize, love.graphics.getWidth(), 40)
 
-    -- Bateria (diminuída)
+    -- Battery (reduced)
     love.graphics.setColor(colors.dark_wall[1]/255, colors.dark_wall[2]/255, colors.dark_wall[3]/255)
-    local maxBatteryBarWidth = 120 -- Diminuído de 200 para 120
-    love.graphics.rectangle("fill", 10, uiY, maxBatteryBarWidth, 25) -- Altura também diminuída
+    local maxBatteryBarWidth = 120 -- Reduced from 200 to 120
+    love.graphics.rectangle("fill", 10, uiY, maxBatteryBarWidth, 25) -- Height also reduced
 
     love.graphics.setColor(0, 1, 0)
     local batteryWidth = (player.battery / player.maxBattery) * maxBatteryBarWidth
     love.graphics.rectangle("fill", 10, uiY, batteryWidth, 25)
 
-    -- Texto da bateria
+    -- Battery text
     love.graphics.setColor(colors.background[1]/255, colors.background[2]/255, colors.background[3]/255)
-    love.graphics.setFont(love.graphics.newFont(14)) -- Fonte um pouco menor
+    love.graphics.setFont(love.graphics.newFont(14)) -- Slightly smaller font
     love.graphics.printf(player.battery .. "/" .. player.maxBattery, 10, uiY + 5, maxBatteryBarWidth, "center")
 
-    love.graphics.printf("Movimentos: " .. player.moves, 140, uiY + 5, 120, "left")
+    love.graphics.printf("Moves: " .. player.moves, 140, uiY + 5, 120, "left")
 
-  
-    -- Instruções (compactadas)
-   
+    -- Score (better aligned)
+    love.graphics.printf("Score: " .. player.score, love.graphics.getWidth() - 150, uiY + 5, 140, "right")
 
-    -- Pontuação (melhor alinhada)
-    love.graphics.printf("Pontuação: " .. player.score, love.graphics.getWidth() - 150, uiY + 5, 140, "right")
-
-    love.graphics.printf("Nivel: " .. game.level, 140, uiY + 20, 120, "left")
+    love.graphics.printf("Level: " .. game.level, 140, uiY + 20, 120, "left")
 
      if player.abilityCooldown > 0 then
         love.graphics.setColor(colors.player_stuck[1]/255, colors.player_stuck[2]/255, colors.player_stuck[3]/255)
-        local cooldownText = "Recarregando: " .. string.format("%.1f", player.abilityCooldown) .. "s"
+        local cooldownText = "Recharging: " .. string.format("%.1f", player.abilityCooldown) .. "s"
         love.graphics.printf(cooldownText, 270, uiY + 5, 180, "left")
     else
         love.graphics.setColor(1, 1, 1)
-        love.graphics.printf("[Space] Quebrar (" .. abilityCost .. ")", 270, uiY + 5, 180, "left")
+        love.graphics.printf("[Space] Break (" .. abilityCost .. ")", 270, uiY + 5, 180, "left")
     end
 end
 
