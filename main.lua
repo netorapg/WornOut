@@ -3,7 +3,6 @@ function generateLevel() end
 function chekItemCollection() end
 function startNextLevel() end
 function love.load()
-
     gridSize = 20
     gridWidth = 30
     gridHeight = 25
@@ -34,6 +33,20 @@ function love.load()
         impulso = anim8.newAnimation( g('4-4', 1), 0.1, 'pauseAtEnd' )
     }
     
+    -- Carrega os arquivos de áudio
+    audio = {
+        music = love.audio.newSource("assets/wornout.mp3", "stream"),
+        explosion = love.audio.newSource("assets/explosion.wav", "static")
+    }
+    
+    -- Configura a música para tocar em loop
+    audio.music:setLooping(true)
+    audio.music:setVolume(0.6)
+    audio.explosion:setVolume(0.8)
+    
+    -- Inicia a música
+    audio.music:play()
+    
     -- 3. Define as outras tabelas
     colors = {
         background = {75, 105, 47},
@@ -41,7 +54,7 @@ function love.load()
         dark_wall = {20, 30, 15},
         player_stuck = {170, 0, 0},
         light_timer = {15, 45, 0},
-        player = {255, 255, 255}  -- Adiciona a cor do jogador
+        player = {255, 255, 255}
     }
 
     game = {
@@ -59,8 +72,15 @@ function love.load()
         abilityRange = 1,
         abilityCooldown = 0, 
         visionRange = 6,
-        currentAnim = sprites.player.idle, -- Agora isso funciona!
+        currentAnim = sprites.player.idle,
         boostAnimTimer = 0
+    }
+
+    screenShake = {
+        duration = 0,
+        intensity = 0,
+        x = 0, 
+        y = 0
     }
 
     shopItems = {
@@ -72,7 +92,36 @@ function love.load()
     goal = {}
     abilityCost = 25
     abilityCooldownDuration = 15
-    startNextLevel()
+
+    -- NOVO: Cria uma textura de pixel único para partículas coloridas
+    local imageData = love.image.newImageData(1, 1)
+    imageData:setPixel(0, 0, 1, 1, 1, 1) -- Pixel branco
+    local particleTexture = love.graphics.newImage(imageData)
+
+    -- CORRIGIDO: Configuração do sistema de partículas
+    wallDebris = love.graphics.newParticleSystem(particleTexture, 100)
+    wallDebris:setParticleLifetime(0.3, 0.8)
+    wallDebris:setEmissionRate(500)
+    wallDebris:setLinearDamping(3)
+    wallDebris:setColors(20/255, 30/255, 15/255, 1, 20/255, 30/255, 15/255, 0)
+    wallDebris:setSpread(math.pi * 2)
+    wallDebris:setSpeed(80, 150)
+    wallDebris:setLinearAcceleration(0, 300, 0, 400)
+    wallDebris:setSizes(3, 1)
+    wallDebris:setSizeVariation(1)
+    activeParticles = {}
+    
+    -- Menu settings
+    menu = {
+        blinkTimer = 0,
+        showText = true
+    }
+    
+    -- Gera labirinto de fundo para o menu
+    generateMenuBackground()
+    
+    -- Inicia no menu
+    gameState = "menu"
 end
 
 
@@ -220,12 +269,20 @@ function generateLevel(levelType)
 end
 
 function love.update(dt)
+    if gameState == "menu" then
+        menu.blinkTimer = menu.blinkTimer + dt
+        if menu.blinkTimer >= 0.5 then
+            menu.showText = not menu.showText
+            menu.blinkTimer = 0
+        end
+        return
+    end
+    
     if gameState == "playing" then
         decayTimer = decayTimer + dt
 
         if decayTimer >= decayInterval then
             player.battery = player.battery - 1
-
             decayTimer = decayTimer - decayInterval
             
             if player.battery <= 0 then
@@ -241,17 +298,46 @@ function love.update(dt)
         if player.abilityCooldown > 0 then
             player.abilityCooldown = player.abilityCooldown - dt
         end
+        
         if player.boostAnimTimer > 0 then
             player.boostAnimTimer = player.boostAnimTimer - dt
             if player.boostAnimTimer <= 0 then
                 updatePlayerAnimation()
             end
         end
+
+        -- Atualiza o screen shake
+        if screenShake.duration > 0 then
+            screenShake.duration = screenShake.duration - dt
+            screenShake.x = (math.random() - 0.5) * screenShake.intensity
+            screenShake.y = (math.random() - 0.5) * screenShake.intensity
+            
+            if screenShake.duration <= 0 then
+                screenShake.x = 0
+                screenShake.y = 0
+            end
+        end
+    end
+    
+    for i = #activeParticles, 1, -1 do
+        local ps = activeParticles[i]
+        ps:update(dt)
+        if ps:getCount() == 0 then
+            table.remove(activeParticles, i)
+        end
     end
     player.currentAnim:update(dt)
 end
 
 function love.keypressed(key)
+    if gameState == "menu" then
+        if key == "space" or key == "return" or key == "enter" then
+            startNextLevel()
+            return
+        end
+        return
+    end
+    
     if gameState == "won" and key == "r" then
         player.score = (player.score + player.battery) - player.moves
         if game.level == game.nextShopLevel then
@@ -284,6 +370,8 @@ function love.keypressed(key)
         end
         return
     end
+    
+    -- ...existing game controls...
     if gameState ~= "playing" then return end
 
     if player.isStuck then
@@ -316,10 +404,18 @@ function love.keypressed(key)
         moved = true
     elseif key == "space" then
         if player.battery > abilityCost and player.abilityCooldown <= 0 then
+            -- Toca o som de explosão
+            audio.explosion:stop() -- Para o som se já estiver tocando
+            audio.explosion:play()
+            
             player.battery = player.battery - abilityCost
             player.abilityCooldown = abilityCooldownDuration
             
-               for dy = -player.abilityRange, player.abilityRange do
+            -- Adiciona screen shake
+            screenShake.duration = 0.3
+            screenShake.intensity = 8
+            
+            for dy = -player.abilityRange, player.abilityRange do
                 for dx = -player.abilityRange, player.abilityRange do
                     if dx == 0 and dy == 0 then
                         
@@ -328,6 +424,12 @@ function love.keypressed(key)
                         if pos.x > 1 and pos.x < gridWidth and pos.y > 1 and pos.y < gridHeight then
                             if map[pos.y][pos.x] == 1 then
                                 map[pos.y][pos.x] = 0
+
+                                local debrisEffect = wallDebris:clone()
+                                debrisEffect:setPosition((pos.x - 0.5) * gridSize, (pos.y - 0.5) * gridSize)
+                                debrisEffect:emit(30)
+                                debrisEffect:stop()
+                                table.insert(activeParticles, debrisEffect)
                             end
                         end
                     end
@@ -339,7 +441,7 @@ function love.keypressed(key)
             end
             player.currentAnim = sprites.player.impulso
             player.currentAnim:gotoFrame(1)
-            player.boostAnimTimer = 0.1 -- Usar a duração definida na criação da animação
+            player.boostAnimTimer = 0.1
         end
         return
         
@@ -386,10 +488,19 @@ end
 
 
 function love.draw()
+    if gameState == "menu" then
+        drawMenu()
+        return
+    end
+    
     if gameState == "shop" then
         drawShop()
         return
     end
+    
+    -- Aplica o screen shake
+    love.graphics.push()
+    love.graphics.translate(screenShake.x, screenShake.y)
     
     love.graphics.clear(colors.background[1]/255, colors.background[2]/255, colors.background[3]/255)
 
@@ -417,6 +528,10 @@ function love.draw()
     end
     love.graphics.setColor(0, 1, 0, 0.5) 
     love.graphics.draw(sprites.sheet, sprites.objetivo, (goal.x - 1) * gridSize, (goal.y - 1) * gridSize)
+
+    for i, ps in ipairs(activeParticles) do
+        love.graphics.draw(ps)
+    end
     
     -- 2. Aplica a máscara de escuridão (se necessário)
     if game.currentLevelType == "dark" and game.lightTimer <= 0 then
@@ -488,6 +603,8 @@ function love.draw()
             love.graphics.printf(lightText, love.graphics.getWidth() / 2 - 75, uiY + 20, 150, "center")
         end
     end
+    
+    love.graphics.pop() -- Remove o screen shake transformation
 end
 
 function drawShop()
@@ -513,6 +630,56 @@ function drawShop()
     love.graphics.printf("Sua escolha te levara para o proximo nivel.", 0, love.graphics.getHeight() - 80, love.graphics.getWidth(), "center")
 end
 
+function drawMenu()
+    -- Desenha o labirinto de fundo
+    love.graphics.clear(colors.background[1]/255, colors.background[2]/255, colors.background[3]/255)
+    
+    -- Desenha o labirinto com transparência
+    love.graphics.setColor(colors.foreground[1]/255, colors.foreground[2]/255, colors.foreground[3]/255, 0.3)
+    for y = 1, gridHeight do
+        for x = 1, gridWidth do
+            if menuMap[y][x] == 1 then
+                love.graphics.rectangle("fill", (x - 1) * gridSize, (y - 1) * gridSize, gridSize, gridSize)
+            end
+        end
+    end
+    
+    -- Grade do labirinto
+    love.graphics.setColor(colors.dark_wall[1]/255, colors.dark_wall[2]/255, colors.dark_wall[3]/255, 0.2)
+    for i = 1, gridWidth do
+        love.graphics.line(i * gridSize, 0, i * gridSize, gridHeight * gridSize)
+    end
+    for i = 1, gridHeight do
+        love.graphics.line(0, i * gridSize, gridWidth * gridSize, i * gridSize)
+    end
+    
+    -- Overlay escuro para melhor legibilidade do texto
+    love.graphics.setColor(0, 0, 0, 0.6)
+    love.graphics.rectangle("fill", 0, 0, love.graphics.getWidth(), love.graphics.getHeight())
+    
+    -- Título do jogo
+    love.graphics.setColor(1, 1, 1)
+    love.graphics.setFont(love.graphics.newFont(48))
+    love.graphics.printf("WORN OUT", 0, love.graphics.getHeight() / 2 - 150, love.graphics.getWidth(), "center")
+    
+    -- Subtítulo
+    love.graphics.setFont(love.graphics.newFont(20))
+    love.graphics.setColor(0.8, 0.8, 0.8)
+    love.graphics.printf("Escape o labirinto antes que sua bateria acabe", 0, love.graphics.getHeight() / 2 - 80, love.graphics.getWidth(), "center")
+    
+    -- Texto piscante "Press Start"
+    if menu.showText then
+        love.graphics.setFont(love.graphics.newFont(24))
+        love.graphics.setColor(1, 1, 0)
+        love.graphics.printf("PRESSIONE ESPAÇO PARA COMEÇAR", 0, love.graphics.getHeight() / 2 + 20, love.graphics.getWidth(), "center")
+    end
+    
+    -- Controles
+    love.graphics.setFont(love.graphics.newFont(16))
+    love.graphics.setColor(0.7, 0.7, 0.7)
+    love.graphics.printf("SETAS: Mover | ESPAÇO: Quebrar paredes", 0, love.graphics.getHeight() - 60, love.graphics.getWidth(), "center")
+    love.graphics.printf("Colete baterias para sobreviver!", 0, love.graphics.getHeight() - 40, love.graphics.getWidth(), "center")
+end
 
 function drawUI()
     local uiY = gridHeight * gridSize + 5
@@ -553,4 +720,36 @@ function drawUI()
         love.graphics.setColor(1, 1, 1)
         love.graphics.printf("[Space] Quebrar (" .. abilityCost .. ")", 270, uiY + 5, 180, "left")
     end
+end
+
+function generateMenuBackground()
+    menuMap = {}
+    for y = 1, gridHeight do
+        menuMap[y] = {}
+        for x = 1, gridWidth do
+            menuMap[y][x] = 1
+        end
+    end
+
+    local function carvePassages(cx, cy)
+        local directions = {{0, -2}, {0, 2}, {-2, 0}, {2, 0}}
+
+        for i = #directions, 2, -1 do
+            local j = math.random(i)
+            directions[i], directions[j] = directions[j], directions[i]
+        end
+
+        for _, dir in ipairs(directions) do
+            local nx, ny = cx + dir[1], cy + dir[2]
+            if ny > 1 and ny < gridHeight and nx > 1 and nx < gridWidth and menuMap[ny][nx] == 1 then
+                menuMap[ny][nx] = 0
+                menuMap[ny - dir[2]/2][nx - dir[1]/2] = 0
+                carvePassages(nx, ny)
+            end
+        end
+    end
+
+    local startX, startY = 3, 3
+    menuMap[startY][startX] = 0
+    carvePassages(startX, startY)
 end
