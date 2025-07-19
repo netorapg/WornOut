@@ -59,14 +59,14 @@ function love.load()
 
     game = {
         level = 0,
-        shopInterval = 5,
-        nextShopLevel = 5
+        shopInterval = 3,  -- Changed from 5 to 3 (shop every 3 levels)
+        nextShopLevel = 3  -- Changed from 5 to 3
     }
 
     -- 4. Now that 'sprites' and 'sprites.player' exist, we can create 'player' table
     player = {
-        battery = 150, 
-        maxBattery = 150,
+        battery = 100,
+        maxBattery = 100,
         moves = 0,
         score = 0,
         abilityRange = 1,
@@ -85,13 +85,19 @@ function love.load()
 
     shopItems = {
         {name="Powerbank", description="Increases maximum battery by 50."},
-        {name = "Shockwave", description="Increases [Space] range by 1. "},
+        {name = "Shockwave", description="Increases [Space] range by 1(increase cost). "},
         {name="Scanner", description="Increases vision range in the dark."}
     }
 
     goal = {}
     abilityCost = 25
     abilityCooldownDuration = 15
+
+    -- Add glow effect for the goal
+    goalGlow = {
+        timer = 0,
+        intensity = 0
+    }
 
     -- NEW: Creates single pixel texture for colored particles
     local imageData = love.image.newImageData(1, 1)
@@ -136,6 +142,8 @@ function startNextLevel()
         levelType = "more_traps"
     elseif specialChance < 0.55 then
         levelType = "dark"
+    elseif specialChance < 0.7 then
+        levelType = "low_energy"
     end
 
     game.currentLevelType = levelType
@@ -150,17 +158,26 @@ function startNextLevel()
     player.x = generatedData.playerStart.x
     player.y = generatedData.playerStart.y
     player.moves = 0
-    player.battery = player.maxBattery
     player.isStuck = false
+
+    -- Aplica o efeito de low_energy aqui
+    if levelType == "low_energy" then
+        player.battery = 50
+    else
+        player.battery = player.maxBattery
+    end
 
     goal.x = generatedData.goalPos.x
     goal.y = generatedData.goalPos.y
+
+    -- Reset goal glow
+    goalGlow.timer = 0
+    goalGlow.intensity = 0
 
     gameState = "playing"
 
     decayInterval = 1
     decayTimer = 0
-
 end
 
 function updatePlayerStatus()
@@ -193,6 +210,8 @@ function generateLevel(levelType)
         numBatteries = 1
     elseif levelType == "more_traps" then
         numTraps = 16
+    elseif levelType == "low_energy" then
+        player.battery = 50
     elseif levelType == "dark" then
         numBatteries = 5
     end
@@ -279,6 +298,10 @@ function love.update(dt)
     end
     
     if gameState == "playing" then
+        -- Update goal glow animation
+        goalGlow.timer = goalGlow.timer + dt * 3 -- Speed of pulsing
+        goalGlow.intensity = (math.sin(goalGlow.timer) + 1) * 0.5 -- Value between 0 and 1
+        
         decayTimer = decayTimer + dt
 
         if decayTimer >= decayInterval then
@@ -329,6 +352,22 @@ function love.update(dt)
     player.currentAnim:update(dt)
 end
 
+function resetGame()
+    player.battery = 100
+    player.maxBattery = 100
+    player.moves = 0
+    player.score = 0
+    player.abilityRange = 1
+    player.abilityCooldown = 0
+    player.visionRange = 6
+    player.currentAnim = sprites.player.idle
+    player.boostAnimTimer = 0
+    game.level = 0
+    game.shopInterval = 3
+    game.nextShopLevel = 3
+    gameState = "menu"
+end
+
 function love.keypressed(key)
     if gameState == "menu" then
         if key == "space" or key == "return" or key == "enter" then
@@ -339,24 +378,27 @@ function love.keypressed(key)
     end
     
     if gameState == "won" and key == "r" then
-        player.score = (player.score + player.battery) - player.moves
-        if game.level == game.nextShopLevel then
+        local newScore = (player.score + player.battery) - player.moves
+        player.score = math.max(0, newScore)
+        -- Check if it's time for shop (every 3 levels)
+        if game.level % 3 == 0 then
             gameState = "shop"
         else
             startNextLevel()
         end
         return
     elseif gameState == "lost" and key == "r" then
-        love.load()
+        resetGame()
         return
 
     elseif gameState == "shop" then
         local choiceMade = false
         if key == "1" then
-            player.maxBattery = player.maxBattery + 50
+            player.maxBattery = player.maxBattery + 5
             choiceMade = true
         elseif key == "2" then
             player.abilityRange = player.abilityRange + 1
+            abilityCost = abilityCost + 25
             choiceMade = true
         elseif key == "3" then
             player.visionRange = player.visionRange + 3
@@ -371,7 +413,6 @@ function love.keypressed(key)
         return
     end
     
-    -- ...existing game controls...
     if gameState ~= "playing" then return end
 
     if player.isStuck then
@@ -526,8 +567,28 @@ function love.draw()
     for _, trap in ipairs(traps) do
         love.graphics.circle("fill", (trap.x - 1) * gridSize + gridSize / 2, (trap.y - 1) * gridSize + gridSize / 2, gridSize / 3 )
     end
-    love.graphics.setColor(0, 1, 0, 0.5) 
-    love.graphics.draw(sprites.sheet, sprites.target, (goal.x - 1) * gridSize, (goal.y - 1) * gridSize)
+    
+    -- Draw glowing target with pulsing effect
+    local goalX = (goal.x - 1) * gridSize
+    local goalY = (goal.y - 1) * gridSize
+    
+    -- Draw outer glow circles
+    local glowIntensity = goalGlow.intensity * 0.8 + 0.2 -- Never fully disappear
+    local glowSize = goalGlow.intensity * 15 + 5 -- Pulsing size
+    
+    -- Multiple glow layers for better effect
+    love.graphics.setColor(0, 1, 0, glowIntensity * 0.1)
+    love.graphics.circle("fill", goalX + gridSize/2, goalY + gridSize/2, glowSize + 10)
+    
+    love.graphics.setColor(0, 1, 0, glowIntensity * 0.3)
+    love.graphics.circle("fill", goalX + gridSize/2, goalY + gridSize/2, glowSize + 5)
+    
+    love.graphics.setColor(0, 1, 0, glowIntensity * 0.6)
+    love.graphics.circle("fill", goalX + gridSize/2, goalY + gridSize/2, glowSize)
+    
+    -- Draw the target sprite with varying opacity
+    love.graphics.setColor(1, 1, 1, glowIntensity * 0.7 + 0.3)
+    love.graphics.draw(sprites.sheet, sprites.target, goalX, goalY)
 
     for i, ps in ipairs(activeParticles) do
         love.graphics.draw(ps)
@@ -575,7 +636,7 @@ function love.draw()
     
     if game.lightTimer > 0 then
         love.graphics.setFont(love.graphics.newFont(20))
-        love.graphics.setColor(colors.light_timer[1]/255, colors.light_timer[2]/255, colors.light_timer[3]/255)
+        love.graphics.setColor(colors.light_timer, colors.light_timer, colors.light_timer)
         local lightText = "Light: " .. string.format("%.1f", game.lightTimer) .. "s"
         love.graphics.printf(lightText, love.graphics.getWidth() - 120, 10, 110, "right")
     end
@@ -590,7 +651,7 @@ function love.draw()
         love.graphics.printf("Total Score: " .. player.score, 0, love.graphics.getHeight() / 2, love.graphics.getWidth(), "center")
         love.graphics.printf("Press R for next level", 0, love.graphics.getHeight() / 2 + 25, love.graphics.getWidth(), "center")
     elseif gameState == "lost" then
-        love.graphics.setColor(colors.foreground)
+        love.graphics.setColor(255, 255, 255)
         love.graphics.setFont(love.graphics.newFont(32))
         love.graphics.printf("BATTERY DEPLETED!", 0, love.graphics.getHeight() / 2 - 30, love.graphics.getWidth(), "center")
         love.graphics.setFont(love.graphics.newFont(16))
@@ -679,6 +740,11 @@ function drawMenu()
     love.graphics.setColor(0.7, 0.7, 0.7)
     love.graphics.printf("ARROWS: Move | SPACE: Break walls", 0, love.graphics.getHeight() - 60, love.graphics.getWidth(), "center")
     love.graphics.printf("Collect batteries to survive!", 0, love.graphics.getHeight() - 40, love.graphics.getWidth(), "center")
+
+    -- Créditos do autor
+    love.graphics.setFont(love.graphics.newFont(14))
+    love.graphics.setColor(1, 1, 1, 0.5)
+    love.graphics.printf("a game by netorapg", 0, love.graphics.getHeight() - 22, love.graphics.getWidth(), "center")
 end
 
 function drawUI()
